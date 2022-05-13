@@ -9,7 +9,9 @@ PROJECT = Room_map
 GLOBAL_PATH = e-puck2_main-processor
 
 #Source files to include
-CSRC += ./main.c
+CSRC += ./main.c \
+		./localization.c \
+		./my_math.c
 
 #Header folders to include
 INCDIR += 
