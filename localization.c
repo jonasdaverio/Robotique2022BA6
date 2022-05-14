@@ -3,11 +3,9 @@
 #include <main.h>
 
 #include <arm_math.h>
-#include <chprintf.h>
 #include <leds.h>
 #include <motors.h>
 #include <sensors/imu.h>
-#include <wchar.h>
 
 #include "localization.h"
 #include "macros.h"
@@ -30,9 +28,6 @@ static void double_integrate_acc(const float* measuredAcc, float delta_t);
 static void integrate_gyro(const float* measuredGyroRate, float delta_t);
 static void integrate_motors(float delta_t);
 
-void reset_speed() { speed[0] = speed[1] = speed[2] = 0;}
-void reset_position() { position[0] = position[1] = position[2] = 0;}
-/* void reset_orientation(); */
 const float* get_speed() { return speed; }
 const float* get_position() { return position; }
 const float* get_orientation() { return orientation_matrix; }
