@@ -1,15 +1,10 @@
-from PyQt5.QtWidgets import (QApplication, QWidget,
-                             QVBoxLayout, QHBoxLayout,
-                             QPushButton, QLabel, QLineEdit,
-                             QGroupBox, QDoubleSpinBox,
-                             QGraphicsView, QGraphicsScene,
-                             QGraphicsItem, QGraphicsItemGroup,
+from PyQt5.QtGui import QBrush, QPen, QColor, QLinearGradient
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (QGraphicsScene, QGraphicsItemGroup,
                              QGraphicsEllipseItem, QGraphicsRectItem,
                              QGraphicsLineItem)
-from PyQt5.QtGui import QBrush, QPen, QColor, QPainter, QLinearGradient
-from PyQt5.QtCore import QTimer, Qt
 import numpy as np
-from math import *
+from math import pi, cos, sin, degrees, copysign, sqrt
 
 #all length are in meters
 robot_diameter = 0.074
@@ -265,6 +260,7 @@ class Map:
             
     def move_robot(self, position, orientation_matrix):
         self.robot.setPos(position[0], -position[1])
+        print(orientation_matrix)
 
     def update_resolution(self, resolution):
         new_grid = {}
@@ -304,7 +300,7 @@ class Map:
                         h_max = 0
                         h_min = 0
 
-                    [p, h, s, n] = self.grid[key]
+                    [p, s, n] = self.grid[key][0,2,3]
                     new_grid[(new_x, new_y)] = (p, (h_max, h_min), s, n) #We assign it its height values, the other stay unchanged
 
         self.grid = new_grid
@@ -312,143 +308,3 @@ class Map:
         self.resolution = resolution
         self.grid_width = sqrt(resolution/startup_resolution)*startup_pen_width
         self.update_scene()
-
-
-class My_view(QGraphicsView):
-    def __init__(self, parent=None):
-        super(My_view, self).__init__(parent)
-
-        self.setTransformationAnchor(QGraphicsView.NoAnchor)
-        self.setResizeAnchor(QGraphicsView.NoAnchor)
-
-    def wheelEvent(self, event):
-        zoomFactor = 1.25
-
-        oldPos = self.mapToScene(event.pos())
-
-        if event.angleDelta().y() < 0:
-            zoomFactor = 1/zoomFactor
-        self.scale(zoomFactor, zoomFactor)
-
-        newPos = self.mapToScene(event.pos())
-
-        delta = newPos - oldPos
-        self.translate(delta.x(), delta.y())
-
-class Main_window:
-    def __init__(self):
-        self.port = "/dev/ttyACM1"
-        self.listening = False
-
-        self.app = QApplication([])
-        self.window = QWidget()
-
-        self.map = Map()
-
-        self.main_layout = QHBoxLayout()
-
-        self.controls_layout = QVBoxLayout()
-        self.view = My_view(self.map.scene)
-
-        self.port_box = QGroupBox()
-        self.port_box_layout = QVBoxLayout()
-
-        self.port_line_layout = QHBoxLayout()
-        self.port_line = QLineEdit(self.port)
-        self.port_line_label = QLabel('Port:')
-
-        self.button_listen = QPushButton('Listen')
-
-        self.resolution_box = QGroupBox()
-        self.resolution_box_layout = QHBoxLayout()
-        self.resolution_label = QLabel("Resolution: ")
-        self.resolution_spin_box = QDoubleSpinBox()
-        
-        self.reset_button = QPushButton("Reset")
-
-        self.window.setLayout(self.main_layout)
-
-        self.init_controls(self.main_layout)
-        self.init_graphics(self.main_layout)
-
-        self.view.show()
-        self.window.show()
-        self.app.exec()
-
-    def init_graphics(self, parent_layout):
-        parent_layout.addWidget(self.view)
-        self.view.setMinimumSize(500,500)
-        self.view.setRenderHint(QPainter.Antialiasing)
-        self.view.scale(startup_scale, startup_scale)
-
-        brush = QBrush(background_color)
-        self.view.setBackgroundBrush(brush)
-
-    def init_controls(self, parent_layout):
-        parent_layout.addLayout(self.controls_layout)
-
-        self.init_port_box(self.controls_layout)
-        self.init_resolution_box(self.controls_layout)
-
-        self.reset_button.clicked.connect(self.reset_button_event)
-        self.controls_layout.addWidget(self.reset_button)
-
-        self.controls_layout.addStretch()
-
-    def init_port_box(self, parent_layout):
-        self.port_box.setMaximumWidth(300)
-        parent_layout.addWidget(self.port_box)
-        self.port_box.setLayout(self.port_box_layout)
-
-        self.init_port_line(self.port_box_layout)
-
-        self.button_listen.setCheckable(True)
-        self.button_listen.clicked.connect(self.toggle_listen)
-        self.port_box_layout.addWidget(self.button_listen)
-
-    def init_port_line(self, parent_layout):
-        self.port_line.editingFinished.connect(self.update_port)
-        self.port_line.setMinimumWidth(100)
-        self.port_line_layout.addWidget(self.port_line_label)
-        self.port_line_layout.addWidget(self.port_line)
-        parent_layout.addLayout(self.port_line_layout)
-
-    def init_resolution_box(self, parent_layout):
-        parent_layout.addWidget(self.resolution_box)
-        self.resolution_box.setLayout(self.resolution_box_layout)
-        self.resolution_box_layout.addWidget(self.resolution_label)
-        self.resolution_box_layout.addWidget(self.resolution_spin_box)
-
-        self.resolution_spin_box.setSuffix(' cm')
-        self.resolution_spin_box.setDecimals(1)
-        self.resolution_spin_box.setMinimum(1)
-        self.resolution_spin_box.setMaximum(20)
-        self.resolution_spin_box.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
-
-        self.resolution_spin_box.setValue(100*self.map.resolution)
-        self.resolution_spin_box.valueChanged.connect(self.update_resolution)
-
-    def update_resolution(self, resolution):
-        def delayed_update_resolution():
-            self.map.update_resolution(0.01*resolution)
-            self.resolution_timer.stop()
-        self.resolution_timer = QTimer()
-        self.resolution_timer.timeout.connect(delayed_update_resolution)
-        self.resolution_timer.start(1000)
-
-    def reset_button_event(self):
-        self.map.reset_scene()
-
-    def update_port(self):
-        self.port = self.line_port.text()
-
-    def toggle_listen(self):
-        self.listening = self.button_listen.isChecked()
-        if self.listening:
-            self.map.update_scene()
-        else:
-            self.map.hide_robot()
-        print(self.listening)
-
-Main_window()
-

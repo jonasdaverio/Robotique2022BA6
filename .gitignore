@@ -56,3 +56,5 @@ compile_commands.json
 build/
 .cache/
 .gdb_startup
+Rapport/
+UI/__pycache__
