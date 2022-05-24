@@ -1,21 +1,19 @@
-from PyQt5.QtGui import QPainter, QBrush, QColor
-from PyQt5.QtCore import QTimer
+from PyQt5.QtGui import QPainter, QBrush, QColor, QLinearGradient, QIcon
+from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtWidgets import (QApplication, QWidget,
                              QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QLineEdit,
                              QGroupBox, QDoubleSpinBox,
-                             QGraphicsView)
+                             QGraphicsView, QGraphicsScene,
+                             QGraphicsRectItem, QGraphicsSimpleTextItem)
 
 import Map
 
-#all length are in meters
 startup_scale = 2000
-startup_resolution = 0.1
-background_color = QColor(216,222,233) #chose because I like it
 
-class My_view(QGraphicsView):
+class Map_view(QGraphicsView):
     def __init__(self, parent=None):
-        super(My_view, self).__init__(parent)
+        super(Map_view, self).__init__(parent)
 
         self.setTransformationAnchor(QGraphicsView.NoAnchor)
         self.setResizeAnchor(QGraphicsView.NoAnchor)
@@ -41,13 +39,16 @@ class Main_window:
 
         self.app = QApplication([])
         self.window = QWidget()
+        self.window.setWindowIcon(QIcon("map.png"))
 
         self.map = Map.Map()
 
         self.main_layout = QHBoxLayout()
 
         self.controls_layout = QVBoxLayout()
-        self.view = My_view(self.map.scene)
+        self.map_view = Map_view(self.map.scene)
+
+        self.scale_view = QGraphicsView()
 
         self.port_box = QGroupBox()
         self.port_box_layout = QVBoxLayout()
@@ -62,7 +63,7 @@ class Main_window:
         self.resolution_box_layout = QHBoxLayout()
         self.resolution_label = QLabel("Resolution: ")
         self.resolution_spin_box = QDoubleSpinBox()
-        
+
         self.reset_button = QPushButton("Reset")
 
         self.window.setLayout(self.main_layout)
@@ -70,18 +71,43 @@ class Main_window:
         self.init_controls(self.main_layout)
         self.init_graphics(self.main_layout)
 
-        self.view.show()
+        self.map_view.show()
         self.window.show()
         self.app.exec()
 
     def init_graphics(self, parent_layout):
-        parent_layout.addWidget(self.view)
-        self.view.setMinimumSize(500,500)
-        self.view.setRenderHint(QPainter.Antialiasing)
-        self.view.scale(startup_scale, startup_scale)
+        parent_layout.addWidget(self.map_view)
+        self.map_view.setMinimumSize(500,500)
+        self.map_view.setRenderHint(QPainter.Antialiasing)
+        self.map_view.scale(startup_scale, startup_scale)
 
-        brush = QBrush(background_color)
-        self.view.setBackgroundBrush(brush)
+        brush = QBrush(Map.background_color)
+        self.map_view.setBackgroundBrush(brush)
+
+        parent_layout.addWidget(self.scale_view)
+        scale_scene = QGraphicsScene()
+        self.scale_view.setScene(scale_scene)
+
+        height = 200
+        width = 40
+        margin = 10
+        pos = (0, 0)
+
+        scale_background = QGraphicsRectItem(pos[0], pos[0], width, -height)
+        scale_rect = QGraphicsRectItem(pos[0]+margin, pos[1]-margin,
+                                  width-2*margin, -height+2*margin)
+
+        gradient = QLinearGradient(pos[0]+margin, -pos[1]+margin,
+                                   0, -pos[1]-height+2*margin)
+        gradient.setColorAt(0, Map.high_color) 
+        gradient.setColorAt(1, Map.low_color)
+        sc_brush = QBrush(gradient)
+        bg_brush = QBrush(Qt.white)
+        scale_rect.setBrush(sc_brush)
+        scale_background.setBrush(bg_brush)
+        
+        scale_scene.addItem(scale_background)
+        scale_scene.addItem(scale_rect)
 
     def init_controls(self, parent_layout):
         parent_layout.addLayout(self.controls_layout)

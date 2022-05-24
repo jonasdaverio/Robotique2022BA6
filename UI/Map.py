@@ -8,14 +8,13 @@ from math import pi, cos, sin, degrees, copysign, sqrt
 
 #all length are in meters
 robot_diameter = 0.074
-startup_scale = 2000
 startup_pen_width = 0.001
 startup_resolution = 0.1
-startup_tof_length = 1
+startup_tof_length = 1.0
 background_color = QColor(216,222,233) #chose because I like it
 high_color = QColor("#d558c8")
 low_color = QColor("#24d292")
-maximum_color_gradient = 1
+maximum_color_gradient = 1.0
 obstacle_light = QColor("#909d9e")
 obstacle_dark = QColor("#181b1b")
 min_obstacle_probability = 0.5
@@ -46,7 +45,10 @@ class Map:
         vec_diag = np.array([self.resolution/2,self.resolution/2])*np.sign(vec_dir)
         vec_w = np.dot(vec_dir, vec_diag)*vec_dir
 
-        self.grid = {(-1,0): (0, (0.005,-0.005), (0,0), 0),
+        self.grid: dict[tuple[int, int],
+                        tuple[float, tuple[float, float],
+                              tuple[float, float], int]] = {
+                      (-1,0): (0, (0.005,-0.005), (0,0), 0),
                       (0,0): (0, (0.01,0), (vec_w[0], vec_w[1]), 0),
                       (0,1): (0, (0.015,0.005), (vec_w[0], vec_w[1]), 0),
                       (0,-1): (0, (0.005,-0.005), (vec_w[0], vec_w[1]), 0),
@@ -192,14 +194,15 @@ class Map:
         self.robot.setRotation(-degrees(self.orientation-pi/2))
 
     def update_slope_and_height(self, position, orientation_matrix):
-        grid_coordinate = self.world_to_grid(position[0:2])
+        [x,y] = self.world_to_grid(position[0:2])
+        grid_coordinate = (x,y)
         height = position[2]
         z_robot = orientation_matrix[:,2] #Vector normal to ground
         dir_vec = -z_robot[0:2] #Vector point towards steepest ascent
         diag_vec = np.sign(dir_vec)*np.array([self.resolution/2, self.resolution/2]) #Diagonal vector closest to dir_vec
 
-        # This strange vector points in the same direction as dir_vec, but it's tip
-        # lie on the same isoline as the highest corner of the grid element
+        # This strange vector points in the same direction as dir_vec, but its tip
+        # lies on the same isoline as the highest corner of the grid element
         # (which is useful for drawing the gradient coloring)
         # It's precisely this that we'll store in the grid dictionary
         # Note that it gives no information about the slope itself but only the direction
@@ -234,7 +237,7 @@ class Map:
     def world_to_grid(self, coordinate):
         x = round(coordinate[0]/self.resolution)
         y = round(coordinate[1]/self.resolution)
-        return (x,y)
+        return (x, y)
 
     #is clear let you inform that you saw no obstacle and that you should decrease the probability
     def update_obstacle_probability(self, position, bayes_factor):
@@ -262,7 +265,7 @@ class Map:
         self.robot.setPos(position[0], -position[1])
         print(orientation_matrix)
 
-    def update_resolution(self, resolution):
+    def update_resolution(self, resolution: float):
         new_grid = {}
         for key in self.grid:
             [x, y] = key
@@ -281,7 +284,7 @@ class Map:
                 for new_y in range(low_y, high_y):
                     if (old_h_max != old_h_min) and (s_vec[0] != 0 or s_vec[1] != 0):
                         #We interpolate the new max and min height of each corners
-                        new_max_vec = np.sign(s_vec)*np.array([resolution/2, resolution/2])
+                        new_max_vec = np.array([resolution/2, resolution/2])*np.sign(s_vec)
                         new_max_vec = new_max_vec + np.array([resolution*new_x, resolution*new_y])
                         old_max_vec = np.sign(s_vec)*np.array([self.resolution/2, self.resolution/2])
                         old_max_vec = old_max_vec + np.array([self.resolution*x, self.resolution*y])
@@ -300,7 +303,7 @@ class Map:
                         h_max = 0
                         h_min = 0
 
-                    [p, s, n] = self.grid[key][0,2,3]
+                    [p, [s, n]] = [self.grid[key][0], self.grid[key][2:4]]
                     new_grid[(new_x, new_y)] = (p, (h_max, h_min), s, n) #We assign it its height values, the other stay unchanged
 
         self.grid = new_grid
