@@ -1,5 +1,5 @@
 from PyQt5.QtGui import QBrush, QPen, QColor, QLinearGradient
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal, QObject
 from PyQt5.QtWidgets import (QGraphicsScene, QGraphicsItemGroup,
                              QGraphicsEllipseItem, QGraphicsRectItem,
                              QGraphicsLineItem)
@@ -25,8 +25,11 @@ def bayes_inference(prior, bayes_factor):
     posterior = (bayes_factor*prior)/(1-prior*bayes_factor*prior)
     return posterior
 
-class Map:
-    def __init__(self):
+class Map(QObject):
+    height_extrema_changed = pyqtSignal([float, float])
+
+    def __init__(self, parent=None):
+        super(Map, self).__init__(parent)
         # The grid format is as follows:
         # {(x, y): (p, (h1, h2), (s1, s2), n)}
         # With x and y the coordinate of the grid element,
@@ -96,6 +99,7 @@ class Map:
                 self.max_height = max_height
             if min_height < self.min_height:
                 self.min_height = min_height
+        self.height_extrema_changed.emit(self.min_height, self.max_height)
 
         for key in self.grid.keys():
             values = self.grid[key]
@@ -226,8 +230,10 @@ class Map:
 
         if h_max > self.max_height:
             self.max_heigh = h_max
+            self.height_extrema_changed.emit(self.min_height, self.max_height)
         if h_min > self.min_height:
             self.min_heigh = h_min
+            self.height_extrema_changed.emit(self.min_height, self.max_height)
 
         x = self.resolution * grid_coordinate[0]
         y = self.resolution * (-grid_coordinate[1])
