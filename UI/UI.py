@@ -1,5 +1,6 @@
+from math import log10, floor
 from PyQt5.QtGui import QPainter, QBrush, QPen, QLinearGradient, QIcon, QFont
-from PyQt5.QtCore import QTimer, Qt, pyqtSignal
+from PyQt5.QtCore import QTimer, Qt, pyqtSignal, QThread
 from PyQt5.QtWidgets import (QApplication, QWidget,
                              QVBoxLayout, QHBoxLayout, QGridLayout,
                              QPushButton, QLabel, QLineEdit,
@@ -7,8 +8,9 @@ from PyQt5.QtWidgets import (QApplication, QWidget,
                              QGraphicsView, QGraphicsScene,
                              QGraphicsLineItem,
                              QGraphicsRectItem, QGraphicsSimpleTextItem)
-from math import log10, floor
+
 import Map
+import Serial
 
 startup_scale = 2000
 suffixes = { -24:'y', -21:'z', -18:'a', -15:'f', -12:'p',
@@ -83,6 +85,12 @@ class Main_window:
 
         self.init_controls(self.main_layout)
         self.init_graphics(self.map_layout)
+
+        self.serial_worker = Serial.Serial_worker()
+        thread = QThread()
+        self.serial_worker.moveToThread(thread)
+        thread.started.connect(self.serial_worker.run)
+        thread.start()
 
         self.map_view.show()
         self.window.show()
