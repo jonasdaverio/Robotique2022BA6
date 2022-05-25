@@ -1,7 +1,9 @@
 #ifndef OBSTACLE_H
 #define OBSTACLE_H
 
-#include <main.h>
+#include <stdbool.h>
+
+#include <ch.h>
 
 typedef struct
 {

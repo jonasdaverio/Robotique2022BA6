@@ -1,6 +1,4 @@
-#include <main.h>
-
-#include <chprintf.h>
+#include <ch.h>
 
 #include <sensors/VL53L0X/VL53L0X.h>
 #include <sensors/proximity.h>

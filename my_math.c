@@ -1,10 +1,9 @@
-#include <main.h>
 #include "my_math.h"
 
 #include <arm_math.h>
 
 //Taken from Quake III, I could never have thought of it myself
-static float fast_inverse_square_root(float number)
+float fast_inverse_square_root(float number)
 {
 	//Intuitively, this work by calculating the log of a number and multiplying
 	//it by -1/2
@@ -25,7 +24,7 @@ static float fast_inverse_square_root(float number)
 	return out;
 }
 
-static void normalize_vec3(float* vec)
+void normalize_vec3(float* vec)
 {
 	float norm_2 = vec[0]*vec[0] + vec[1]*vec[1] + vec[2]*vec[2];
 	float inv_norm = fast_inverse_square_root(norm_2);
