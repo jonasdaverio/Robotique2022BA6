@@ -1,14 +1,8 @@
-#include "ch.h"
-#include "hal.h"
-#include <main.h>
-#include <usbcfg.h>
-#include <chprintf.h>
-#include <leds.h>
-#include <main.h>
+#include <ch.h>
 #include <motors.h>
-#include <fft.h>
-#include <rotation.h>
-#include <sensors/VL53L0X/VL53L0X.h>
+
+#include "rotation.h"
+#include "obstacles.h"
 
 #define MIN_VALUE_THRESHOLD	10000 
 
@@ -16,13 +10,11 @@
 #define DIST_OBJ 100 //en mm = 10cm
 #define COEF 80 // nombre de 'step' par centimètre 
 
-Int p ;
+int p;
 p=0;
 
-Void turn (double angle, bool i){ //I=0 -> tourne droite, 1 ->gauche
+void turn (double angle, bool i){ //I=0 -> tourne droite, 1 ->gauche
 	
-	//right_motor_set_speed(300);
-	//left_motor_set_speed(-300);
 
 	right_motor_set_speed(0);
 	left_motor_set_speed(0);
@@ -57,7 +49,7 @@ Void turn (double angle, bool i){ //I=0 -> tourne droite, 1 ->gauche
         //f_mode = get_mode();
 
         //distance_TOF is updated by VL53L0X TOF library //OUI
-        distance_TOF = VL53L0X_get_dist_mm();
+	distance_TOF = get_obstacles()->front;
 
         //computes the speed to give to the motors
         //speed = pi_regulator_distance((float)distance_TOF*CM, DIST_PLAY*CM);
