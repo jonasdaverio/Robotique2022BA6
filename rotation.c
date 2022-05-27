@@ -10,9 +10,6 @@
 #define DIST_OBJ 100 //en mm = 10cm
 #define COEF 80 // nombre de 'step' par centimètre 
 
-int p;
-p=0;
-
 void turn (double angle, bool i){ //I=0 -> tourne droite, 1 ->gauche
 	
 
@@ -21,7 +18,7 @@ void turn (double angle, bool i){ //I=0 -> tourne droite, 1 ->gauche
 
 	left_motor_set_pos(0); 
 	right_motor_set_pos(0);//place la position des roues du robot à (0;0)
-	if (i==0){
+	if (i == false){
 		right_motor_set_speed(-300); //TOURNE A DROITE
 		left_motor_set_speed(300);
 		while(left_motor_get_pos()<(COEF*(15.7*angle)/360)){ 
@@ -57,37 +54,44 @@ void turn (double angle, bool i){ //I=0 -> tourne droite, 1 ->gauche
         //float angle = get_angle();
         //computes a correction factor to let the robot rotate to be aligned with the sound source
         //speed_correction = pi_regulator_angle(angle, 0); 
-While (1){
-	if(distance_TOF >= DIST_OBJ){
-		right_motor_set_speed(MOTOR_SPEED_LIMIT*0.8);
-		left_motor_set_speed(MOTOR_SPEED_LIMIT*0.8);
-	}
-	else{
-		if (p%2==0){
-			turn(90,0);//fonction, arrête le robot, tourne de 90 degrés droite, robot reprend sa vitesse
 
-			if(distance_TOF >= DIST_OBJ){
-				chThdSleepMilliseconds(1000);//attend 1seconde (il avance pendant 1 seconde)
-				turn(90,0);		
+
+void deplacement (){
+
+	int p;
+	p=0;
+	while (1){
+		if(distance_TOF >= DIST_OBJ){
+			right_motor_set_speed(MOTOR_SPEED_LIMIT*0.8);
+			left_motor_set_speed(MOTOR_SPEED_LIMIT*0.8);
+		}
+		else{
+			if (p%2==0){
+				turn(90,0);//fonction, arrête le robot, tourne de 90 degrés droite, 	robot reprend sa vitesse
+
+				if(distance_TOF >= DIST_OBJ){
+					chThdSleepMilliseconds(1000);//attend 1seconde (il avance pendant 1 seconde)
+					turn(90,0);		
+				}
+				else {
+					turn(90,0);
+				}
 			}
 			else {
-				turn(90,0);
-			}
-		
-		else {
-			turn(90,1);//fonction, arrête le robot, tourne de 90 degrés gauche, robot reprend sa vitesse
+				turn(90,1);//fonction, arrête le robot, tourne de 90 degrés gauche, robot reprend sa vitesse
 
-			if(distance_TOF >= DIST_OBJ){
-				chThdSleepMilliseconds(1000);
-				turn(90,1);		
+				if(distance_TOF >= DIST_OBJ){
+					chThdSleepMilliseconds(1000);
+					turn(90,1);		
+				}
+				else {
+					turn(90,1);
+				}
+				p++;
+
 			}
-			else {
-				turn(90,1);
-			}
-		p++
 
 		}
+		break;
 	}
 }
-
-	break;

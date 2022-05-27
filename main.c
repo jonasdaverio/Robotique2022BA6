@@ -9,13 +9,8 @@
 #include <usbcfg.h>
 #include <main.h>
 #include <motors.h>
-<<<<<<< Updated upstream
-=======
+
 #include <leds.h>
->>>>>>> Stashed changes
-#include <pi_regulator.h>
-#include <animal_move.h>
-#include <fft.h>
 #include <arm_math.h>
 #include <sensors/VL53L0X/VL53L0X.h>
 
