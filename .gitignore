@@ -50,3 +50,9 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# Custom rules
+compile_commands.json
+build/
+.cache/
+.gdb_startup
