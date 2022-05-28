@@ -35,9 +35,9 @@ int main(void)
 
 	messagebus_init(&bus, &bus_lock, &bus_condvar);
 
+	comm_init();
 	localization_init();
 	obstacle_init();
-	comm_init();
 	motors_init();
 	chThdSleepSeconds(1);
 
@@ -52,8 +52,8 @@ int main(void)
 		/* right_motor_set_speed(0); */
 		/* chThdSleepMilliseconds(500); */
 
-		/* left_motor_set_speed(MTOSTEP(0.05f)); */
-		/* right_motor_set_speed(MTOSTEP(0.05f)); */
+		left_motor_set_speed(MTOSTEP(0.05f));
+		right_motor_set_speed(MTOSTEP(0.05f));
 		/* chThdSleepSeconds(5); */
 
 		/* left_motor_set_speed(0); */

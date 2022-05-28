@@ -5,8 +5,6 @@
 #define ANGLE_DIMENSION 3
 #define ACC_BUFFER_SIZE 50
 
-#include "i2c_bus.h"
-
 void localization_init(void);
 
 const float* get_speed(void);

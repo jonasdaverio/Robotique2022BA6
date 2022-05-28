@@ -9,11 +9,13 @@
 #include "localization.h"
 #include "obstacles.h"
 
+#define COMM_PERIOD 100 //ms
+
 static THD_WORKING_AREA(comm_thd_wa, 512);
 static THD_FUNCTION(comm_thd, arg);
 
 //From TP4
-static void SendUint8ToComputer(uint8_t* data, uint16_t size) 
+static void SendUint8ToComputer(uint8_t* data, uint16_t size)
 {
 	chSequentialStreamWrite((BaseSequentialStream *)&SD3, (uint8_t*)"START", 5);
 	chSequentialStreamWrite((BaseSequentialStream *)&SD3, (uint8_t*)&size, sizeof(uint16_t));
@@ -53,7 +55,7 @@ static THD_FUNCTION(comm_thd, arg)
 		memcpy(bytes + size_position, orientation, size_orientation);
 		memcpy(bytes + size_position + size_orientation, &(obstacles->front), sizeof(float));
 		//We'll pack the bools in a byte
-		bytes[size_position+size_orientation+sizeof(float)] = obstacles->frontRight1 
+		bytes[size_position+size_orientation+sizeof(float)] = obstacles->frontRight1
 														+ (obstacles->frontRight2 << 1)
 														+ (obstacles->right << 2)
 														+ (obstacles->rearRight << 3)
@@ -63,6 +65,6 @@ static THD_FUNCTION(comm_thd, arg)
 														+ (obstacles->frontLeft1 << 7);
 		SendUint8ToComputer(bytes, sizeof(bytes));
 
-		chThdSleepUntilWindowed(time, time + MS2ST(100));
+		chThdSleepUntilWindowed(time, time + MS2ST(COMM_PERIOD));
 	}
 }

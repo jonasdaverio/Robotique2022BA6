@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import (QGraphicsScene, QGraphicsItemGroup,
                              QGraphicsEllipseItem, QGraphicsRectItem,
                              QGraphicsLineItem)
 import numpy as np
+import matplotlib.pyplot as plt
 from math import pi, degrees, copysign, sqrt, atan, sin, cos
 
 #all length are in meters
@@ -20,7 +21,7 @@ obstacle_light = QColor("#909d9e")
 obstacle_dark = QColor("#181b1b")
 startup_pen_width = 0.001
 
-startup_resolution = 0.1
+startup_resolution = 0.05
 max_sample_nb = 10 #Max value of n parameter (see update_grid_robot_on)
 min_obstacle_probability = 0.5
 prior_obstacle_prob = 0.1 #Prior probability that a random place is an obstacle
@@ -72,6 +73,41 @@ class Map(QObject):
 
         self.grid_width = startup_pen_width
         self.items = {}
+
+    def plot3d(self):
+        vertices = {}
+        for grid in self.grid:
+            values = self.grid[grid]
+            s_vec = np.array(self.grid[grid][2])
+            if any(s_vec != np.zeros(2)):
+                [h_max, h_min] = values[1]
+                center = self.resolution*np.array(grid)
+
+                p_max = np.sign(s_vec)*self.resolution/2
+                p_min = -p_max
+                p1 = np.array([-1, 1]) * p_max
+                p2 = -p1
+
+                h_center = (h_max + h_min)/2
+                delta_h = np.dot(p1, s_vec)/np.dot(s_vec, s_vec)*(h_max - h_center)
+                h1 = h_center + delta_h
+                h2 = h_center - delta_h
+
+                vertices[tuple(p_max+center)] = h_max
+                vertices[tuple(p_min+center)] = h_min
+                vertices[tuple(p1+center)] = h1
+                vertices[tuple(p2+center)] = h2
+
+        xy = np.array(list(vertices.keys()))
+        if len(xy) != 0:
+            x = xy[:,0]
+            y = xy[:,1]
+            z = np.array(list(vertices.values()))
+
+            fig = plt.figure()
+            ax = fig.add_subplot(projection='3d')
+            ax.plot_trisurf(x, y, z)
+            plt.show()
 
     def show_robot(self):
         if self.robot_hidden:
@@ -296,7 +332,7 @@ class Map(QObject):
 
         angle = self.orientation
         dir_vec = np.array([cos(angle), sin(angle)])
-        start_point = np.array([self.robot.pos().x(), self.robot.pos().y()])
+        start_point = np.array([self.robot.pos().x(), -self.robot.pos().y()])
         start_point += robot_diameter/2*dir_vec
         line_vec = length * dir_vec
         end_point = start_point + line_vec
@@ -341,8 +377,8 @@ class Map(QObject):
     def find_grid_robot_on(self):
         left = self.robot.pos().x() - robot_diameter/2
         right = left + robot_diameter
-        bottom = self.robot.pos().y() - robot_diameter/2
-        top = bottom + self.resolution
+        bottom = -self.robot.pos().y() - robot_diameter/2
+        top = bottom + robot_diameter
 
         first_intersection_y = left\
                              - (left - self.resolution/2)%self.resolution \
@@ -350,16 +386,16 @@ class Map(QObject):
         first_intersection_x = bottom\
                              - (bottom - self.resolution/2)%self.resolution \
                              + self.resolution
-        y_intersections = np.arange(first_intersection_y, right+self.resolution,\
+        y_intersections = np.arange(first_intersection_y, right,\
                                     self.resolution)
-        x_intersections = np.arange(first_intersection_x, top+self.resolution,\
+        x_intersections = np.arange(first_intersection_x, top,\
                                     self.resolution)
 
         grid_cells = []
         for x in y_intersections:
             for y in x_intersections:
                 if (x - self.robot.pos().x())**2\
-                 + (y - self.robot.pos().y())**2 < robot_diameter**2:
+                 + (y + self.robot.pos().y())**2 < robot_diameter**2/4:
                      grid_cells.append(\
                              self.world_to_grid((x - self.resolution/2,\
                                                  y - self.resolution/2)))
@@ -372,9 +408,13 @@ class Map(QObject):
                      grid_cells.append(\
                              self.world_to_grid((x + self.resolution/2,\
                                                  y + self.resolution/2)))
-        if len(grid_cells) == 0:
-            grid_cells.append(self.world_to_grid((self.robot.pos().x(),\
-                                                  self.robot.pos().y())))
+        
+        grid_cells.append(self.world_to_grid((left, -self.robot.pos().y())))
+        grid_cells.append(self.world_to_grid((right, -self.robot.pos().y())))
+        grid_cells.append(self.world_to_grid((self.robot.pos().x(), top)))
+        grid_cells.append(self.world_to_grid((self.robot.pos().x(), bottom)))
+        grid_cells.append(self.world_to_grid((self.robot.pos().x(),\
+                                              -self.robot.pos().y())))
 
         return list(dict.fromkeys(grid_cells))
         
@@ -388,7 +428,7 @@ class Map(QObject):
             self.update_obstacle_probability(obstacle_coordinate,\
                                              obstacle_bayes_factor)
         for i in range(0, 8):
-            robot_pos = np.array([self.robot.pos().x(), self.robot.pos().y()])
+            robot_pos = np.array([self.robot.pos().x(), -self.robot.pos().y()])
             ir_pos = robot_pos\
                    + np.array([ cos(ir_angles[i]+self.orientation),\
                                 sin(ir_angles[i]+self.orientation) ])\

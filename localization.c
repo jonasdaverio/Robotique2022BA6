@@ -24,18 +24,11 @@ static float speed[SPATIAL_DIMENSIONS] = {0};
 //but I'v never really understood them)
 static float32_t orientation_matrix[SPATIAL_DIMENSIONS*SPATIAL_DIMENSIONS] = {0};
 
-#ifdef INTEGRATE_ACC
-static void double_integrate_acc(const float* measuredAcc, float delta_t);
-#endif //INTEGRATE_ACC
-
 static void integrate_motors(float delta_t);
-static void integrate_gyro(const float* measuredGyroRate, float* rotation_matrix, float delta_t);
-static void compute_rotation(const float* measuredGyroRate, const float* measuredAcc, float delta_t);
+static void compute_rotation(const float* measuredAcc);
 
-#ifdef USE_SENSOR_FUSION
 static float* get_averaged_acceleration(const float* measuredAcc);
 static float acc_buffer[ACC_BUFFER_SIZE*SPATIAL_DIMENSIONS] = {0};
-#endif
 
 const float* get_speed() { return speed; }
 const float* get_position() { return position; }
@@ -89,13 +82,8 @@ static THD_FUNCTION(localization_thd, arg)
 			time = chVTGetSystemTime();
 			float delta_t = (float)(time - prev_time)/CH_CFG_ST_FREQUENCY;
 
-#ifdef INTEGRATE_ACC //Doesn't work well
-			//We integrate acceleration
-			double_integrate_acc(imu_values.acceleration, delta_t);
-#else
-			compute_rotation(imu_values.gyro_rate, imu_values.acceleration, delta_t);
-			/* integrate_motors(delta_t); //Directly edit position and orientation */
-#endif //INTEGRATE_ACC
+			compute_rotation(imu_values.acceleration);
+			integrate_motors(delta_t); //Directly edit position and orientation
 		}
 	}
 }
@@ -123,19 +111,11 @@ static void rotate_orientation(float* rotation_matrix, float* orientation_matrix
 }
 
 //Use both acc and gyro to determine non robot-Z rotation
-static void compute_rotation(const float* measuredGyroRate, const float* measuredAcc, float delta_t)
+static void compute_rotation(const float* measuredAcc)
 {
-	//We integrate angular velocity
-	float gyro_rotation_matrix[SPATIAL_DIMENSIONS*SPATIAL_DIMENSIONS] = {0};
-	integrate_gyro(measuredGyroRate, gyro_rotation_matrix, delta_t);
-	float gyroOrientationMatrix[SPATIAL_DIMENSIONS*SPATIAL_DIMENSIONS] = {0};
-	rotate_orientation(gyro_rotation_matrix, gyroOrientationMatrix);
-
-#ifdef USE_SENSOR_FUSION //Not yet implemented
 	float* averaged_acc_robot = get_averaged_acceleration(measuredAcc);
-
-	//Because of drift, we need to correct the gyroscope measurement with gravity
-	//We'll see how much we diverged from reality
+	//We'll compare our orientation with gravity which by definition
+	//should point in z. We'll see how much we diverged from reality
 	//And we'll compute a correction matrix to realign the z axis with gravity
 	//Gravity doesn't provide any information about rotation around robot-Z axis
 
@@ -143,50 +123,32 @@ static void compute_rotation(const float* measuredGyroRate, const float* measure
 	arm_matrix_instance_f32 arm_orientation_matrix = {SPATIAL_DIMENSIONS, SPATIAL_DIMENSIONS,
 														orientation_matrix};
 	//We convert it in the world reference frame
-	float averaged_acc_world[SPATIAL_DIMENSIONS*SPATIAL_DIMENSIONS] = {0};
+	float averaged_acc_world[SPATIAL_DIMENSIONS] = {0};
 	arm_matrix_instance_f32 arm_averaged_acc_world = {SPATIAL_DIMENSIONS, 1, averaged_acc_world};
 	arm_mat_mult_f32(&arm_orientation_matrix, &arm_average_acc_robot, &arm_averaged_acc_world);
 
-	chprintf((BaseSequentialStream*)&SD3, "%f\t%f\t%f\r\n",averaged_acc_robot[0], averaged_acc_robot[1], averaged_acc_robot[2]);
 
-	//We first find the angle between averaged_acc_world and -z_angle, by linearizing
-	//The angle is roughly equal to du/z, with du = sqrt(dx^2 + dy^2)
-	//We go in the basis formed by -z, the projection of the measure
-	//on the x-y plane, and the cross product of the two last vectors
+	//We first find the angle between averaged_acc_world and -z, by linearizing.
+	//This angle is roughly equal to sqrt(gx^2 + gy^2)/sqrt(gx^2 + gy^2 + gz^2)
+	//With g being the acceleration vector.
+	//We go in the basis formed by z, the projection of the measure
+	//on the x-y plane, and the opposite of the cross product of the last two vectors.
 	//And finally, we get the total matrix by PAP^T, with P the change of basis
 	//and A the matrix of rotation correction. All operations are hardcoded to avoid
 	//many matrix multiplicatoin
 	float inv_sqr = fast_inverse_square_root(averaged_acc_world[0]*averaged_acc_world[0]
-											+averaged_acc_world[1]*averaged_acc_world[1]);
-	float coeff1 = averaged_acc_world[0]*averaged_acc_world[2]*inv_sqr;
-	float coeff2 = averaged_acc_world[1]*averaged_acc_world[2]*inv_sqr;
-	float acc_rotation_matrix[] = {1, 0, coeff1,
-								0, 1, coeff2,
-								-coeff1, -coeff2, 1};
+											+averaged_acc_world[1]*averaged_acc_world[1]
+											+averaged_acc_world[2]*averaged_acc_world[2]);
+	float coeff1 = averaged_acc_world[0]*inv_sqr;
+	float coeff2 = averaged_acc_world[1]*inv_sqr;
+	float acc_rotation_matrix[] = {1,      0, -coeff1,
+								   0,      1, -coeff2,
+							  coeff1, coeff2, 1};
 
 	float accOrientationMatrix[SPATIAL_DIMENSIONS*SPATIAL_DIMENSIONS] = {0};
 	rotate_orientation(acc_rotation_matrix, accOrientationMatrix);
-	//We'll then compare the two result
-	//The bigger the difference, the more we'll privilege the accelerometer reading
-	//and vice versa
 
-	//One way to check is to multiply one with the transpose of the other
-	//If they were identical, we would get the identity
-	arm_matrix_instance_f32 arm_gyro_orientation_matrix = {SPATIAL_DIMENSIONS, SPATIAL_DIMENSIONS,
-															gyroOrientationMatrix};
-	arm_matrix_instance_f32 arm_acc_orientation_matrix = {SPATIAL_DIMENSIONS, SPATIAL_DIMENSIONS,
-															accOrientationMatrix};
-	arm_mat_trans_f32(&arm_acc_orientation_matrix, &arm_acc_orientation_matrix);
-
-	float deltaMatrix[SPATIAL_DIMENSIONS*SPATIAL_DIMENSIONS] = {0};
-	arm_matrix_instance_f32 arm_deltaMatrix = {SPATIAL_DIMENSIONS, SPATIAL_DIMENSIONS, deltaMatrix};
-
-	arm_mat_mult_f32(&arm_acc_orientation_matrix, &arm_gyro_orientation_matrix, &arm_deltaMatrix);
-#else
-	(void) measuredAcc;
-#endif //USE_SENSOR_FUSION
-
-	memcpy(orientation_matrix, gyroOrientationMatrix, SPATIAL_DIMENSIONS*SPATIAL_DIMENSIONS*sizeof(float));
+	memcpy(orientation_matrix, accOrientationMatrix, SPATIAL_DIMENSIONS*SPATIAL_DIMENSIONS*sizeof(float));
 }
 
 //small angle approximation of a rotation_matrix
@@ -233,28 +195,6 @@ static void integrate_motors(float delta_t)
 	memcpy(prev_displacement_world, displacement_world, SPATIAL_DIMENSIONS*sizeof(float));
 }
 
-//Trapezoidally integrate angular velocity, tricky because of the change
-//of basis between the robot and the world frame
-static void integrate_gyro(const float* measuredGyroRate, float* rotation_matrix, float delta_t)
-{
-	//We need to keep a copy for trapezoidal integration
-	static float gyro_rate[ANGLE_DIMENSION] = {0};
-
-	//delta_* means delta_angle, the small angular change between t and t+dt
-	//We do a trapezoidal integration, so we take the average of consecutive
-	//measurements
-	float delta_x = 0.5f * delta_t * (gyro_rate[0] + measuredGyroRate[0]);
-	float delta_y = 0.5f * delta_t * (gyro_rate[1] + measuredGyroRate[1]);
-	float delta_z = 0.5f * delta_t * (gyro_rate[2] + measuredGyroRate[2]);
-	//We don't care about z as it is handled by the wheel
-	gyro_rate[0] = measuredGyroRate[0];
-	gyro_rate[1] = measuredGyroRate[1];
-	gyro_rate[2] = measuredGyroRate[2];
-
-	init_rotation_matrix(delta_x, delta_y, delta_z, rotation_matrix);
-}
-
-#ifdef USE_SENSOR_FUSION
 //Circular buffer implimentation with efficient average
 static float* get_averaged_acceleration(const float* measuredAcc)
 {
@@ -289,45 +229,6 @@ static float* get_averaged_acceleration(const float* measuredAcc)
 	}
 	return meanAcc;
 }
-#endif
-
-#ifdef INTEGRATE_ACC //Doesn't work well
-//Trapezoidally double integrate acceleration into speed
-static void double_integrate_acc(const float* measuredAcc, float delta_t)
-{
-	//We need to keep a copy for trapezoidal integration
-	static float acc[SPATIAL_DIMENSIONS] = {0}; // in m/s^2
-
-	//We first get the speed delta in the robot reference frame
-	float delta_v[SPATIAL_DIMENSIONS] = {0};
-	//The minus sign is there because the IMU measure the reaction acceleration
-	delta_v[0] = -0.5f * (acc[0] + measuredAcc[0]);
-	delta_v[1] = -0.5f * (acc[1] + measuredAcc[1]);
-	delta_v[2] = -0.5f * (acc[2] + measuredAcc[2]);
-	memcpy(acc, measuredAcc, 3*sizeof(float));
-
-	//We then need to convert it back in the world reference frame
-	arm_matrix_instance_f32 delta_v_arm_vec = {SPATIAL_DIMENSIONS, 1, delta_v};
-	float delta_v_world[SPATIAL_DIMENSIONS] = {0};
-	arm_matrix_instance_f32 delta_v_world_arm_vec = {SPATIAL_DIMENSIONS, 1, delta_v_world};
-	arm_matrix_instance_f32 arm_orientation_matrix = {SPATIAL_DIMENSIONS, SPATIAL_DIMENSIONS, orientation_matrix};
-	arm_mat_mult_f32(&arm_orientation_matrix, &delta_v_arm_vec, &delta_v_world_arm_vec);
-	//We can then subtract the gravity component
-	delta_v_world[2] -= STANDARD_GRAVITY;
-
-	float prevSpeed[SPATIAL_DIMENSIONS] = {0};
-	memcpy(prevSpeed, speed, 3*sizeof(float));
-
-	speed[0] += delta_t * delta_v_world[0];
-	speed[1] += delta_t * delta_v_world[1];
-	speed[2] += delta_t * delta_v_world[2];
-
-	position[0] += 0.5f * delta_t*(speed[0] + prevSpeed[0]);
-	position[1] += 0.5f * delta_t*(speed[1] + prevSpeed[1]);
-	position[2] += 0.5f * delta_t*(speed[2] + prevSpeed[2]);
-	chprintf((BaseSequentialStream*)&SD3, "%f\r\n", position[0]);
-}
-#endif //INTEGRATE_ACC
 
 void reset_orientation()
 {

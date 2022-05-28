@@ -94,6 +94,7 @@ class Main_window:
         self.resolution_spin_box = QDoubleSpinBox()
 
         self.reset_button = QPushButton("Reset")
+        self.plot_button = QPushButton("3D plot")
 
         self.window.setLayout(self.main_layout)
 
@@ -286,6 +287,8 @@ class Main_window:
 
         self.reset_button.clicked.connect(self.reset_button_event)
         self.controls_layout.addWidget(self.reset_button)
+        self.plot_button.clicked.connect(self.map.plot3d)
+        self.controls_layout.addWidget(self.plot_button)
 
         self.controls_layout.addStretch()
 
