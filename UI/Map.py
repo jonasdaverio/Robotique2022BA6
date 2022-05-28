@@ -4,25 +4,35 @@ from PyQt5.QtWidgets import (QGraphicsScene, QGraphicsItemGroup,
                              QGraphicsEllipseItem, QGraphicsRectItem,
                              QGraphicsLineItem)
 import numpy as np
-from math import pi, cos, sin, degrees, copysign, sqrt
+from math import pi, degrees, copysign, sqrt, atan, sin, cos
 
 #all length are in meters
+#robot dimensions
+max_tof_length = 0.5
 robot_diameter = 0.074
-startup_pen_width = 0.001
-startup_resolution = 0.1
-startup_tof_length = 1.0
+ir_angles = (-pi/12, -pi/4, -pi/2, -5*pi/6, 5*pi/6, pi/2, pi/4, pi/12)
+
+#colors and pens
 background_color = QColor(216,222,233) #chose because I like it
 high_color = QColor("#d558c8")
 low_color = QColor("#24d292")
-maximum_color_gradient = 1.0
 obstacle_light = QColor("#909d9e")
 obstacle_dark = QColor("#181b1b")
+startup_pen_width = 0.001
+
+startup_resolution = 0.1
+max_sample_nb = 10 #Max value of n parameter (see update_grid_robot_on)
 min_obstacle_probability = 0.5
-prior_obstacle_prob = 0.1 #Prior probability that a random place is an obstacle (should be low)
+prior_obstacle_prob = 0.1 #Prior probability that a random place is an obstacle
+
+#bayes factors
 obstacle_bayes_factor = 1.6 #Empirical
+no_obstacle_bayes_factor = 1/obstacle_bayes_factor #Empirical
+bayes_factor_robot_on = 0.55 #Empirical
+ir_bayes_factor = 1.8
 
 def bayes_inference(prior, bayes_factor):
-    posterior = (bayes_factor*prior)/(1-prior*bayes_factor*prior)
+    posterior = (bayes_factor*prior)/(1-prior+bayes_factor*prior)
     return posterior
 
 class Map(QObject):
@@ -35,34 +45,26 @@ class Map(QObject):
         # With x and y the coordinate of the grid element,
         # p the probability that it is an obstacle,
         # hx the respective height of the heighest and lowest corners
-        # gx the coordinates of the slope vector (see update_slope_and_height function for a more thourough explanation)
-        # n the number of samples taken from the robot for the slope (useful only for updates)
+        # gx the coordinates of the slope vector (see update_grid_robot_on
+        # function for a more thourough explanation)
+        # n the number of samples taken from the robot for the slope
+        # (useful only for updates)
         self.min_height = 0
         self.max_height = 0
+        self.should_update = False
         self.scene = QGraphicsScene()
         self.resolution = startup_resolution
-        self.orientation = 0 #We begin facing upwards
-
-        theta = pi/4
-        vec_dir = np.array([cos(theta),sin(theta)])
-        vec_diag = np.array([self.resolution/2,self.resolution/2])*np.sign(vec_dir)
-        vec_w = np.dot(vec_dir, vec_diag)*vec_dir
+        self.orientation = 0 #random value, which is unimportant
 
         self.grid: dict[tuple[int, int],
                         tuple[float, tuple[float, float],
-                              tuple[float, float], int]] = {
-                      (-1,0): (0, (0.005,-0.005), (0,0), 0),
-                      (0,0): (0, (0.01,0), (vec_w[0], vec_w[1]), 0),
-                      (0,1): (0, (0.015,0.005), (vec_w[0], vec_w[1]), 0),
-                      (0,-1): (0, (0.005,-0.005), (vec_w[0], vec_w[1]), 0),
-                      (1,-1): (0, (0.01,0), (vec_w[0], vec_w[1]), 0),
-                      (1,1): (0, (0.02,0.01), (vec_w[0], vec_w[1]), 0),
-                      (-1,-1): (0, (0,-0.01), (vec_w[0], vec_w[1]), 0),
-                      (-1,1): (0, (0.01,0), (vec_w[0], vec_w[1]), 0),
-                      (1,0): (0, (0.015,0.005), (vec_w[0], vec_w[1]), 0)}
+                              tuple[float, float], int]] = {}
 
         self.robot = QGraphicsItemGroup()
-        self.draw_robot()
+        self.tof_ray = QGraphicsLineItem()
+        self.tof_dot = QGraphicsEllipseItem()
+        self.tof_length = 0
+        self.init_robot()
         self.robot_hidden = True
 
         pen = QPen(Qt.white)
@@ -85,22 +87,32 @@ class Map(QObject):
     def reset_scene(self):
         for key in self.items:
             self.scene.removeItem(self.items[key])
-        self.hide_robot()
         self.items = {}
+        self.grid = {}
 
-    def update_scene(self):
+    def compute_height_extrema(self):
         #We first find the max and min
-        self.max_height = 0
-        self.min_height = 0
+        old_max = self.max_height
+        old_min = self.min_height
+
+        first = True #Because there is no sensible
+                     #value to initialize the extrema with
         for key in self.grid.keys():
             values = self.grid[key]
             [max_height, min_height] = values[1]
+            if first:
+                self.min_height = min_height
+                self.max_height = max_height
+                first = False
             if max_height > self.max_height:
                 self.max_height = max_height
             if min_height < self.min_height:
                 self.min_height = min_height
-        self.height_extrema_changed.emit(self.min_height, self.max_height)
+        if self.min_height != old_min or self.max_height != old_max:
+            self.height_extrema_changed.emit(self.min_height, self.max_height)
+            self.should_update = True
 
+    def update_scene(self):
         for key in self.grid.keys():
             values = self.grid[key]
 
@@ -112,7 +124,8 @@ class Map(QObject):
             x = self.resolution * key[0]
             y = self.resolution * (-key[1])
             self.color_rectangle(rect, x, y, values)
-        self.show_robot()
+
+        self.should_update = False
 
     def add_rectangle(self, key):
         x = self.resolution * (key[0] - 0.5)
@@ -136,19 +149,27 @@ class Map(QObject):
 
         p = values[0]
         slope = values[2]
+        n = values[3]
         if p >= min_obstacle_probability:
-            color = interpolate_color((p - min_obstacle_probability)/(1-min_obstacle_probability), obstacle_light, obstacle_dark)
+            color = interpolate_color((p - min_obstacle_probability)\
+                                    / (1-min_obstacle_probability),\
+                                      obstacle_light, obstacle_dark)
             brush = QBrush(color)
         elif slope[0] != 0 or slope [1] != 0:
-            x_gradient = values[2][0]
-            y_gradient = values[2][1]
+            x_gradient = slope[0]
+            y_gradient = slope[1]
 
-            gradient = QLinearGradient(x-x_gradient, y+y_gradient, x+x_gradient, y-y_gradient)
+            gradient = QLinearGradient(x-x_gradient, y+y_gradient,\
+                                       x+x_gradient, y-y_gradient)
 
             #We scale the grading according to the global extrema
             max_delta_height = self.max_height - self.min_height
-            low_coeff = (min_height-self.min_height)/max_delta_height
-            high_coeff = (max_height-self.min_height)/max_delta_height
+            if max_delta_height == 0:
+                low_coeff = 0.5
+                high_coeff = 0.5
+            else:
+                low_coeff = (min_height-self.min_height)/max_delta_height
+                high_coeff = (max_height-self.min_height)/max_delta_height
 
             low_color_interpolate = interpolate_color(low_coeff, low_color, high_color) 
             high_color_interpolate = interpolate_color(high_coeff, low_color, high_color) 
@@ -156,6 +177,8 @@ class Map(QObject):
             gradient.setColorAt(0, low_color_interpolate)
             gradient.setColorAt(1, high_color_interpolate)
             brush = QBrush(gradient)
+        elif n > 0: #if there is a measure
+            brush = QBrush(interpolate_color(0.5, low_color, high_color))
         else:
             brush = QBrush(background_color)
 
@@ -164,11 +187,12 @@ class Map(QObject):
         rect.setPen(pen)
         rect.setBrush(brush)
 
-    def draw_robot(self):
+    def init_robot(self):
         robot_pen = QPen(Qt.black)
         robot_pen.setWidthF(startup_pen_width)
 
-        ellipse = QGraphicsEllipseItem(-robot_diameter/2, -robot_diameter/2, robot_diameter, robot_diameter)
+        ellipse = QGraphicsEllipseItem(-robot_diameter/2, -robot_diameter/2,\
+                                       robot_diameter, robot_diameter)
         arrow_1 = QGraphicsLineItem(0, robot_diameter/3, 0, -robot_diameter/3)
         arrow_2 = QGraphicsLineItem(0, -robot_diameter/3, robot_diameter/4, 0)
         arrow_3 = QGraphicsLineItem(0, -robot_diameter/3, -robot_diameter/4, 0)
@@ -181,74 +205,203 @@ class Map(QObject):
         tof_pen = QPen(Qt.red)
         tof_pen.setWidthF(startup_pen_width)
         tof_brush = QBrush(Qt.red)
-        tof_ray = QGraphicsLineItem(0, -robot_diameter/2, 0, -robot_diameter/2-startup_tof_length)
-        tof_dot = QGraphicsEllipseItem(-robot_diameter/20, -11*robot_diameter/20-startup_tof_length, robot_diameter/10, robot_diameter/10)
-        tof_ray.setPen(tof_pen)
-        tof_dot.setBrush(tof_brush)
-        tof_dot.setPen(tof_pen)
+        self.tof_ray.setPen(tof_pen)
+        self.tof_dot.setBrush(tof_brush)
+        self.tof_dot.setPen(tof_pen)
 
         self.robot.addToGroup(ellipse)
         self.robot.addToGroup(arrow_1)
         self.robot.addToGroup(arrow_2)
         self.robot.addToGroup(arrow_3)
-        self.robot.addToGroup(tof_ray)
-        self.robot.addToGroup(tof_dot)
+        self.robot.addToGroup(self.tof_ray)
+        self.robot.addToGroup(self.tof_dot)
         self.robot.setZValue(1)
 
-        self.robot.setRotation(-degrees(self.orientation-pi/2))
+    def update_grid_robot_on(self, position, orientation_matrix):
+        cells = self.find_grid_robot_on()
+        robot_center = position[0:2]
+        robot_height = position[2]
 
-    def update_slope_and_height(self, position, orientation_matrix):
-        [x,y] = self.world_to_grid(position[0:2])
-        grid_coordinate = (x,y)
-        height = position[2]
-        z_robot = orientation_matrix[:,2] #Vector normal to ground
+        #Vector normal to ground
+        z_robot = np.array(orientation_matrix)[:,2]
         dir_vec = -z_robot[0:2] #Vector point towards steepest ascent
-        diag_vec = np.sign(dir_vec)*np.array([self.resolution/2, self.resolution/2]) #Diagonal vector closest to dir_vec
+        diag_vec = np.array([self.resolution/2, self.resolution/2]) 
+        #Diagonal vector closest to dir_vec
+        diag_vec = np.sign(dir_vec) * diag_vec
 
         # This strange vector points in the same direction as dir_vec, but its tip
         # lies on the same isoline as the highest corner of the grid element
         # (which is useful for drawing the gradient coloring)
         # It's precisely this that we'll store in the grid dictionary
         # Note that it gives no information about the slope itself but only the direction
-        s_vec = np.dot(diag_vec, dir_vec)/np.dot(dir_vec, dir_vec) * dir_vec
-        slope = np.linalg.norm(dir_vec)/z_robot[2] # definition of the slope
-        delta_h = slope*np.linalg.norm(s_vec) #
-        h_max = height + delta_h
-        h_min = height - delta_h
-
-        if grid_coordinate in self.grid:
-            [p, h, s, n] = self.grid[grid_coordinate]
-            h_max = (n*h[0] + h_max)/(n+1)
-            h_min = (n*h[1] + h_min)/(n+1)
-            s_new_x = (n*s[0] + s_vec[0])/(n+1)
-            s_new_y = (n*s[1] + s_vec[1])/(n+1)
-            self.grid[grid_coordinate] = (p, (h_max, h_min), (s_new_x, s_new_y), n+1)
-            rect = self.items[grid_coordinate]
+        epsilon = 1e-6
+        if np.linalg.norm(dir_vec) < epsilon:
+            s_vec = np.array([0,0])
         else:
-            self.grid[grid_coordinate] = (prior_obstacle_prob, (h_max, h_min), (s_vec[0], s_vec[1]), 1)
-            rect = self.add_rectangle(grid_coordinate)
+            s_vec = np.dot(diag_vec, dir_vec) / np.dot(dir_vec, dir_vec) * dir_vec
+        slope = np.linalg.norm(dir_vec)/z_robot[2] # definition of the slope
+        delta_h = slope*np.linalg.norm(s_vec) #delta between center and corners
 
-        if h_max > self.max_height:
-            self.max_heigh = h_max
-            self.height_extrema_changed.emit(self.min_height, self.max_height)
-        if h_min > self.min_height:
-            self.min_heigh = h_min
-            self.height_extrema_changed.emit(self.min_height, self.max_height)
+        for grid_coordinate in cells:
+            cell_center = self.resolution*np.array(grid_coordinate)
+            rel_pos_vec = cell_center - np.array(robot_center)
+            delta_s = np.dot(cell_center, dir_vec) / np.linalg.norm(dir_vec)
+            height = robot_height + slope*delta_s #cell center height
+            h_max = height + delta_h
+            h_min = height - delta_h
 
-        x = self.resolution * grid_coordinate[0]
-        y = self.resolution * (-grid_coordinate[1])
-        self.color_rectangle(rect, x, y, self.grid[grid_coordinate])
+            if grid_coordinate in self.grid:
+                [p, h, s, n] = self.grid[grid_coordinate]
+                if n >= max_sample_nb:
+                    n = max_sample_nb - 1
+                h_max = (n*h[0] + h_max)/(n+1)
+                h_min = (n*h[1] + h_min)/(n+1)
+                s_new_x = (n*s[0] + s_vec[0])/(n+1)
+                s_new_y = (n*s[1] + s_vec[1])/(n+1)
+                self.grid[grid_coordinate] = (p, (h_max, h_min),\
+                                              (s_vec[0], s_vec[1]), n+1)
+                rect = self.items[grid_coordinate]
+            else:
+                self.grid[grid_coordinate] = (prior_obstacle_prob, (h_max, h_min), \
+                                              (s_vec[0], s_vec[1]), 1)
+                rect = self.add_rectangle(grid_coordinate)
+            rel_dist = np.linalg.norm(rel_pos_vec)
+            #bayes_factor is smaller towards the edges
+            bayes_factor = bayes_factor_robot_on\
+                         + 4 * (1-bayes_factor_robot_on)\
+                             * (rel_dist / (self.resolution + robot_diameter))**2
+            if bayes_factor > 1:
+                bayes_factor = 1
+            # bayes_factor = bayes_factor_robot_on
+            self.update_obstacle_probability(grid_coordinate, bayes_factor)
 
+        self.compute_height_extrema()
+        if not self.should_update:
+            for grid_coordinate in cells:
+                rect = self.items[grid_coordinate]
+                x = grid_coordinate[0]*self.resolution
+                y = grid_coordinate[1]*self.resolution
+                self.color_rectangle(rect, x, y, self.grid[grid_coordinate])
 
     def world_to_grid(self, coordinate):
         x = round(coordinate[0]/self.resolution)
         y = round(coordinate[1]/self.resolution)
         return (x, y)
 
-    #is clear let you inform that you saw no obstacle and that you should decrease the probability
-    def update_obstacle_probability(self, position, bayes_factor):
-        grid_coordinate = self.world_to_grid(position)
+    def find_intersection(self):
+        if self.tof_length > max_tof_length:
+            length = max_tof_length
+        else:
+            length = self.tof_length
 
+        angle = self.orientation
+        dir_vec = np.array([cos(angle), sin(angle)])
+        start_point = np.array([self.robot.pos().x(), self.robot.pos().y()])
+        start_point += robot_diameter/2*dir_vec
+        line_vec = length * dir_vec
+        end_point = start_point + line_vec
+        top_right = np.maximum(start_point, end_point)
+        bottom_left = np.minimum(start_point, end_point)
+        
+        first_intersections = bottom_left \
+                            - (bottom_left - self.resolution/2)%self.resolution \
+                            + self.resolution*np.ones(2)
+        y_intersections = np.arange(first_intersections[0], top_right[0],\
+                                    self.resolution)
+        x_intersections = np.arange(first_intersections[1], top_right[1],\
+                                    self.resolution)
+        
+        grid_cells = []
+        for y in x_intersections:
+            k = (y - start_point[1])/(line_vec[1])
+            x = start_point[0] + k*line_vec[0]
+            x = round(x/self.resolution)
+            y1 = round(y/self.resolution - 0.5)
+            y2 = round(y/self.resolution + 0.5)
+            grid_cells.append((x, y1))
+            grid_cells.append((x, y2))
+        for x in y_intersections:
+            k = (x - start_point[0])/(line_vec[0])
+            y = start_point[1] + k*line_vec[1]
+            y = round(y/self.resolution)
+            x1 = round(x/self.resolution - 0.5)
+            x2 = round(x/self.resolution + 0.5)
+            grid_cells.append((x1, y))
+            grid_cells.append((x2, y))
+        grid_cells = list(dict.fromkeys(grid_cells)) #remove duplicate
+
+        if self.tof_length > max_tof_length:
+            obstacle_coordinate = None
+        else:
+            obstacle_coordinate = self.world_to_grid(end_point)
+            if obstacle_coordinate in grid_cells: grid_cells.remove(obstacle_coordinate)
+
+        return [grid_cells, obstacle_coordinate]
+
+    def find_grid_robot_on(self):
+        left = self.robot.pos().x() - robot_diameter/2
+        right = left + robot_diameter
+        bottom = self.robot.pos().y() - robot_diameter/2
+        top = bottom + self.resolution
+
+        first_intersection_y = left\
+                             - (left - self.resolution/2)%self.resolution \
+                             + self.resolution
+        first_intersection_x = bottom\
+                             - (bottom - self.resolution/2)%self.resolution \
+                             + self.resolution
+        y_intersections = np.arange(first_intersection_y, right+self.resolution,\
+                                    self.resolution)
+        x_intersections = np.arange(first_intersection_x, top+self.resolution,\
+                                    self.resolution)
+
+        grid_cells = []
+        for x in y_intersections:
+            for y in x_intersections:
+                if (x - self.robot.pos().x())**2\
+                 + (y - self.robot.pos().y())**2 < robot_diameter**2:
+                     grid_cells.append(\
+                             self.world_to_grid((x - self.resolution/2,\
+                                                 y - self.resolution/2)))
+                     grid_cells.append(\
+                             self.world_to_grid((x + self.resolution/2,\
+                                                 y - self.resolution/2)))
+                     grid_cells.append(\
+                             self.world_to_grid((x - self.resolution/2,\
+                                                 y + self.resolution/2)))
+                     grid_cells.append(\
+                             self.world_to_grid((x + self.resolution/2,\
+                                                 y + self.resolution/2)))
+        if len(grid_cells) == 0:
+            grid_cells.append(self.world_to_grid((self.robot.pos().x(),\
+                                                  self.robot.pos().y())))
+
+        return list(dict.fromkeys(grid_cells))
+        
+    def update_obstacles(self, ir):
+        [cells, obstacle_coordinate] = self.find_intersection()
+
+        for cell in cells:
+            self.update_obstacle_probability(cell, no_obstacle_bayes_factor)
+
+        if obstacle_coordinate != None:
+            self.update_obstacle_probability(obstacle_coordinate,\
+                                             obstacle_bayes_factor)
+        for i in range(0, 8):
+            robot_pos = np.array([self.robot.pos().x(), self.robot.pos().y()])
+            ir_pos = robot_pos\
+                   + np.array([ cos(ir_angles[i]+self.orientation),\
+                                sin(ir_angles[i]+self.orientation) ])\
+                   * robot_diameter/2
+            if ir[i]:
+                bayes_factor = ir_bayes_factor
+            else:
+                bayes_factor = 1/ir_bayes_factor
+
+            self.update_obstacle_probability(self.world_to_grid(ir_pos),
+                                             bayes_factor)
+
+    def update_obstacle_probability(self, grid_coordinate, bayes_factor):
         if grid_coordinate in self.grid:
             [p, h, s, n] = self.grid[grid_coordinate]
             if p == 0:
@@ -263,13 +416,29 @@ class Map(QObject):
             self.grid[grid_coordinate] = values
             rect = self.add_rectangle(grid_coordinate)
         
-        x = self.resolution * grid_coordinate[0]
-        y = self.resolution * (-grid_coordinate[1])
-        self.color_rectangle(rect, x, y, values)
-            
+        if not self.should_update:
+            x = grid_coordinate[0]*self.resolution
+            y = grid_coordinate[1]*self.resolution
+            self.color_rectangle(rect, x, y, self.grid[grid_coordinate])
+                    
     def move_robot(self, position, orientation_matrix):
         self.robot.setPos(position[0], -position[1])
-        print(orientation_matrix)
+        forward_vec = [orientation_matrix[1][1], -orientation_matrix[0][1]]
+        if forward_vec[0] == 0:
+            angle = copysign(forward_vec[1], pi/2)
+        else:
+            angle = atan(forward_vec[1]/forward_vec[0])
+            if forward_vec[0] < 0:
+                angle += pi
+        self.orientation = angle - pi/2 #because robot front is -y
+        self.robot.setRotation(90-degrees(self.orientation))
+        #because Qt 0 degrees is up and indirect oriented
+
+    def update_tof(self, length):
+        self.tof_length = length
+        self.tof_ray.setLine(0, -robot_diameter/2, 0, -robot_diameter/2-length)
+        self.tof_dot.setRect(-robot_diameter/20, -11*robot_diameter/20-length,
+                              robot_diameter/10, robot_diameter/10)
 
     def update_resolution(self, resolution: float):
         new_grid = {}
@@ -312,8 +481,8 @@ class Map(QObject):
                     [p, [s, n]] = [self.grid[key][0], self.grid[key][2:4]]
                     new_grid[(new_x, new_y)] = (p, (h_max, h_min), s, n) #We assign it its height values, the other stay unchanged
 
-        self.grid = new_grid
         self.reset_scene()
+        self.grid = new_grid
         self.resolution = resolution
         self.grid_width = sqrt(resolution/startup_resolution)*startup_pen_width
         self.update_scene()

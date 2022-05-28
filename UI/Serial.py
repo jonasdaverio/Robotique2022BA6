@@ -1,8 +1,8 @@
-from PyQt5.QtCore import QObject, QTimer
+from PyQt5.QtCore import QObject
 import serial
 import struct
+from PyQt5.QtCore import pyqtSignal
 from dataclasses import dataclass
-from queue import Queue
 
 @dataclass
 class Measurement:
@@ -15,13 +15,16 @@ class Serial_worker(QObject):
     def __init__(self):
         super().__init__()
 
-        self.port = None
+        self.port = serial.Serial()
         self.data: list[Measurement]
         self.listening = False
 
-    # This function is almost copy paste from the script plotImage from the TPs    
+    received_measurements = pyqtSignal(Measurement)
+    timeout = pyqtSignal()
+
+    # This function is almost copy paste from the script plotImage from the TPs
     @staticmethod
-    def readMeasurementSerial(port):
+    def readMeasurementsSerial(port):
         state = 0
         while(state != 5):
             character = port.read(1)
@@ -62,7 +65,7 @@ class Serial_worker(QObject):
                     state = 1
                 else:
                     state = 0
-        
+
         size = struct.unpack('<h', port.read(2))
         size = size[0] #The second element is unused (see doc)
 
@@ -91,21 +94,32 @@ class Serial_worker(QObject):
             return None
 
     def open_port(self, port):
-        try:
-            self.port = serial.Serial(port, timeout=0.5)
+        if port != self.port.port or not self.port.is_open:
+            self.port.close()
+            self.port.port = port
+            self.port.timeout = 0.5
+            try:
+                self.port.open()
+            except:
+                return False
             return True
-        except:
-            return False
-    def close_port(self):
-        self.port = None
+        else:
+            return self.port.is_open
 
-    def listen(self):
-        if self.port:
-            self.listening = True
+    def close_port(self):
+        self.port.close()
+
+    def start_listening(self):
+        self.listening = True
     def stop_listening(self):
         self.listening = False
 
     def run(self):
-        if True: #self.port and self.listening:
-            print("patate")
-            QTimer.singleShot(500, self.run)
+        if self.port.is_open:
+            self.port.reset_input_buffer()
+            while(self.listening):
+                measurements = self.readMeasurementsSerial(self.port)
+                if measurements == None:
+                    self.timeout.emit()
+                else:
+                    self.received_measurements.emit(measurements)

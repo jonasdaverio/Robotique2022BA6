@@ -50,7 +50,7 @@ static THD_FUNCTION(comm_thd, arg)
 		uint8_t bytes[size_position+size_orientation+size_obstacles] = {0};
 
 		memcpy(bytes, position, size_position);
-		memcpy(bytes + size_position, orientation, size_position);
+		memcpy(bytes + size_position, orientation, size_orientation);
 		memcpy(bytes + size_position + size_orientation, &(obstacles->front), sizeof(float));
 		//We'll pack the bools in a byte
 		bytes[size_position+size_orientation+sizeof(float)] = obstacles->frontRight1 

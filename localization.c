@@ -94,7 +94,7 @@ static THD_FUNCTION(localization_thd, arg)
 			double_integrate_acc(imu_values.acceleration, delta_t);
 #else
 			compute_rotation(imu_values.gyro_rate, imu_values.acceleration, delta_t);
-			integrate_motors(delta_t); //Directly edit position and orientation
+			/* integrate_motors(delta_t); //Directly edit position and orientation */
 #endif //INTEGRATE_ACC
 		}
 	}
@@ -130,10 +130,10 @@ static void compute_rotation(const float* measuredGyroRate, const float* measure
 	integrate_gyro(measuredGyroRate, gyro_rotation_matrix, delta_t);
 	float gyroOrientationMatrix[SPATIAL_DIMENSIONS*SPATIAL_DIMENSIONS] = {0};
 	rotate_orientation(gyro_rotation_matrix, gyroOrientationMatrix);
-	
+
 #ifdef USE_SENSOR_FUSION //Not yet implemented
 	float* averaged_acc_robot = get_averaged_acceleration(measuredAcc);
-	
+
 	//Because of drift, we need to correct the gyroscope measurement with gravity
 	//We'll see how much we diverged from reality
 	//And we'll compute a correction matrix to realign the z axis with gravity
@@ -161,15 +161,15 @@ static void compute_rotation(const float* measuredGyroRate, const float* measure
 	float coeff1 = averaged_acc_world[0]*averaged_acc_world[2]*inv_sqr;
 	float coeff2 = averaged_acc_world[1]*averaged_acc_world[2]*inv_sqr;
 	float acc_rotation_matrix[] = {1, 0, coeff1,
-							  0, 1, coeff2,
-						  -coeff1, -coeff2, 1};
+								0, 1, coeff2,
+								-coeff1, -coeff2, 1};
 
 	float accOrientationMatrix[SPATIAL_DIMENSIONS*SPATIAL_DIMENSIONS] = {0};
 	rotate_orientation(acc_rotation_matrix, accOrientationMatrix);
 	//We'll then compare the two result
 	//The bigger the difference, the more we'll privilege the accelerometer reading
 	//and vice versa
-	
+
 	//One way to check is to multiply one with the transpose of the other
 	//If they were identical, we would get the identity
 	arm_matrix_instance_f32 arm_gyro_orientation_matrix = {SPATIAL_DIMENSIONS, SPATIAL_DIMENSIONS,
@@ -177,7 +177,7 @@ static void compute_rotation(const float* measuredGyroRate, const float* measure
 	arm_matrix_instance_f32 arm_acc_orientation_matrix = {SPATIAL_DIMENSIONS, SPATIAL_DIMENSIONS,
 															accOrientationMatrix};
 	arm_mat_trans_f32(&arm_acc_orientation_matrix, &arm_acc_orientation_matrix);
-	
+
 	float deltaMatrix[SPATIAL_DIMENSIONS*SPATIAL_DIMENSIONS] = {0};
 	arm_matrix_instance_f32 arm_deltaMatrix = {SPATIAL_DIMENSIONS, SPATIAL_DIMENSIONS, deltaMatrix};
 
@@ -185,7 +185,7 @@ static void compute_rotation(const float* measuredGyroRate, const float* measure
 #else
 	(void) measuredAcc;
 #endif //USE_SENSOR_FUSION
-	
+
 	memcpy(orientation_matrix, gyroOrientationMatrix, SPATIAL_DIMENSIONS*SPATIAL_DIMENSIONS*sizeof(float));
 }
 
@@ -216,8 +216,8 @@ static void integrate_motors(float delta_t)
 
 	//We keep a copy for trapezoidal integration
 	static float prev_displacement_world[SPATIAL_DIMENSIONS] = {0};
-	//The displacement is always in y in the robot reference frame
-	float displacement_robot[SPATIAL_DIMENSIONS] = {0, delta_t*0.5f*(speed_l+speed_r), 0};
+	//The displacement is always in -y in the robot reference frame
+	float displacement_robot[SPATIAL_DIMENSIONS] = {0, -delta_t*0.5f*(speed_l+speed_r), 0};
 	float displacement_world[SPATIAL_DIMENSIONS] = {0};
 	arm_matrix_instance_f32 arm_displacement_robot = {SPATIAL_DIMENSIONS, 1, displacement_robot};
 	arm_matrix_instance_f32 arm_displacement_world = {SPATIAL_DIMENSIONS, 1, displacement_world};
@@ -245,11 +245,13 @@ static void integrate_gyro(const float* measuredGyroRate, float* rotation_matrix
 	//measurements
 	float delta_x = 0.5f * delta_t * (gyro_rate[0] + measuredGyroRate[0]);
 	float delta_y = 0.5f * delta_t * (gyro_rate[1] + measuredGyroRate[1]);
+	float delta_z = 0.5f * delta_t * (gyro_rate[2] + measuredGyroRate[2]);
 	//We don't care about z as it is handled by the wheel
 	gyro_rate[0] = measuredGyroRate[0];
 	gyro_rate[1] = measuredGyroRate[1];
+	gyro_rate[2] = measuredGyroRate[2];
 
-	init_rotation_matrix(delta_x, delta_y, 0, rotation_matrix);
+	init_rotation_matrix(delta_x, delta_y, delta_z, rotation_matrix);
 }
 
 #ifdef USE_SENSOR_FUSION
@@ -259,7 +261,7 @@ static float* get_averaged_acceleration(const float* measuredAcc)
 	static float* currentAcc = acc_buffer;
 	static bool firstRound = true;
 	static float meanAcc[SPATIAL_DIMENSIONS] = {0};
-	
+
 	if(firstRound)
 	{
 		uint8_t steps = (currentAcc - acc_buffer)/3;

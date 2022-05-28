@@ -1,7 +1,10 @@
+import os
+from sys import platform
 from math import log10, floor
+import numpy as np
 from PyQt5.QtGui import QPainter, QBrush, QPen, QLinearGradient, QIcon, QFont
 from PyQt5.QtCore import QTimer, Qt, pyqtSignal, QThread
-from PyQt5.QtWidgets import (QApplication, QWidget,
+from PyQt5.QtWidgets import (QApplication, QWidget, QSizePolicy,
                              QVBoxLayout, QHBoxLayout, QGridLayout,
                              QPushButton, QLabel, QLineEdit,
                              QGroupBox, QDoubleSpinBox,
@@ -11,6 +14,15 @@ from PyQt5.QtWidgets import (QApplication, QWidget,
 
 import Map
 import Serial
+
+if platform == "linux" or platform == "linux2":
+    startup_port = "/dev/ttyACM1"
+elif platform == "darwin":
+    startup_port = "/dev/cu.usbmodem0"
+elif platform == "win32":
+    startup_port = "COM4"
+else:
+    startup_port = "port"
 
 startup_scale = 2000
 suffixes = { -24:'y', -21:'z', -18:'a', -15:'f', -12:'p',
@@ -43,17 +55,19 @@ class Map_view(QGraphicsView):
 
 class Main_window:
     def __init__(self):
-        self.port = "/dev/ttyACM1"
         self.listening = False
 
         self.app = QApplication([])
         self.window = QWidget()
-        self.window.setWindowIcon(QIcon("map.png"))
+        dirname = os.path.dirname(__file__)
+        iconpath = os.path.join(dirname, "map.png")
+        self.window.setWindowIcon(QIcon(iconpath))
 
         self.map = Map.Map()
 
         self.main_layout = QHBoxLayout()
 
+        self.controls_widget = QWidget()
         self.controls_layout = QVBoxLayout()
         self.map_layout = QGridLayout()
 
@@ -69,7 +83,7 @@ class Main_window:
         self.port_box_layout = QVBoxLayout()
 
         self.port_line_layout = QHBoxLayout()
-        self.port_line = QLineEdit(self.port)
+        self.port_line = QLineEdit(startup_port)
         self.port_line_label = QLabel('Port:')
 
         self.button_listen = QPushButton('Listen')
@@ -86,15 +100,24 @@ class Main_window:
         self.init_controls(self.main_layout)
         self.init_graphics(self.map_layout)
 
+        self.serial_thread = QThread()
         self.serial_worker = Serial.Serial_worker()
-        thread = QThread()
-        self.serial_worker.moveToThread(thread)
-        thread.started.connect(self.serial_worker.run)
-        thread.start()
+        self.init_serial()
 
         self.map_view.show()
         self.window.show()
         self.app.exec()
+
+    def init_serial(self):
+        self.serial_worker.moveToThread(self.serial_thread)
+        self.serial_thread.started.connect(self.serial_worker.run)
+        self.app.aboutToQuit.connect(self.terminate_serial)
+        self.serial_worker.received_measurements.connect(self.update_map)
+
+    def terminate_serial(self):
+        self.serial_worker.stop_listening()
+        self.serial_thread.quit()
+        self.serial_thread.wait()
 
     def init_graphics(self, parent_layout):
         self.main_layout.addLayout(parent_layout)
@@ -149,7 +172,7 @@ class Main_window:
     def compute_scale(self, scale):
         target_size_px = 200
         target_size_m = target_size_px/scale
-        
+
         target_size_exponent = floor(log10(target_size_m))
         order_of_mag = pow(10, target_size_exponent)
         target_size_mantissa = target_size_m/order_of_mag
@@ -182,7 +205,7 @@ class Main_window:
         else:
             suffixe = '?'
 
-        return str(new_mantissa) + " " + suffixe + "m"
+        return "{:.3g}".format(new_mantissa) + " " + suffixe + "m"
 
 
     def update_height(self, min_height, max_height):
@@ -228,8 +251,8 @@ class Main_window:
                                   width-2*margin_x, -height+2*margin_y)
 
         gradient = QLinearGradient(0, height/2-margin_y, 0, -(height/2-margin_y))
-        gradient.setColorAt(0, Map.high_color) 
-        gradient.setColorAt(1, Map.low_color)
+        gradient.setColorAt(0, Map.low_color)
+        gradient.setColorAt(1, Map.high_color)
         h_brush = QBrush(gradient)
         bg_brush = QBrush(Qt.white)
         height_rect.setBrush(h_brush)
@@ -243,7 +266,7 @@ class Main_window:
         self.min_height_text.setPos(0, height/2-margin_y)
         self.max_height_text.setPos(0, -(height/2-margin_y)
                                        -self.max_height_text.boundingRect().height())
-        
+
         height_scene.addItem(height_background)
         height_scene.addItem(height_rect)
         height_scene.addItem(self.min_height_text)
@@ -252,7 +275,11 @@ class Main_window:
         self.update_height(0, 0)
 
     def init_controls(self, parent_layout):
-        parent_layout.addLayout(self.controls_layout)
+        parent_layout.addWidget(self.controls_widget)
+        size_policy = QSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        self.controls_widget.setSizePolicy(size_policy)
+        self.controls_layout.setContentsMargins(0, 0, 0, 0)
+        self.controls_widget.setLayout(self.controls_layout)
 
         self.init_port_box(self.controls_layout)
         self.init_resolution_box(self.controls_layout)
@@ -263,7 +290,6 @@ class Main_window:
         self.controls_layout.addStretch()
 
     def init_port_box(self, parent_layout):
-        self.port_box.setMaximumWidth(200)
         parent_layout.addWidget(self.port_box)
         self.port_box.setLayout(self.port_box_layout)
 
@@ -274,8 +300,6 @@ class Main_window:
         self.port_box_layout.addWidget(self.button_listen)
 
     def init_port_line(self, parent_layout):
-        self.port_line.editingFinished.connect(self.update_port)
-        self.port_line.setMinimumWidth(100)
         self.port_line_layout.addWidget(self.port_line_label)
         self.port_line_layout.addWidget(self.port_line)
         parent_layout.addLayout(self.port_line_layout)
@@ -303,19 +327,52 @@ class Main_window:
         self.resolution_timer.timeout.connect(delayed_update_resolution)
         self.resolution_timer.start(1000)
 
+    def update_map(self, measurement):
+        self.map.move_robot(measurement.position, measurement.orientation)
+        self.map.update_tof(measurement.tof)
+        self.map.update_obstacles(measurement.ir)
+        self.map.update_grid_robot_on(measurement.position,
+                                      measurement.orientation)
+        if self.map.should_update:
+            self.map.update_scene()
+
     def reset_button_event(self):
         self.map.reset_scene()
 
-    def update_port(self):
-        self.port = self.port_line.text()
+    def animate_listen(self):
+        if self.listening:
+            QTimer.singleShot(800, self.animate_listen)
+            text = "Listening" + "." * self.listening_animation_step
+            self.button_listen.setText(text)
+            self.listening_animation_step += 1
+            self.listening_animation_step %= 4
+
+    def reenable_button(self):
+        self.button_listen.setEnabled(True)
+        self.button_listen.setChecked(False)
+        self.listening = False
+        self.button_listen.setText("Listen")
 
     def toggle_listen(self):
         self.listening = self.button_listen.isChecked()
         if self.listening:
-            self.map.update_scene()
+            port = self.port_line.text()
+            if self.serial_worker.open_port(port):
+                self.map.show_robot()
+                self.listening_animation_step = 0
+                self.animate_listen()
+                self.port_line.setDisabled(True)
+                self.serial_worker.start_listening()
+                self.serial_thread.start()
+            else:
+                self.button_listen.setText("Connection failed")
+                self.button_listen.setDisabled(True)
+                QTimer.singleShot(800, self.reenable_button)
         else:
+            self.button_listen.setText("Listen")
             self.map.hide_robot()
-        print(self.listening)
+            self.port_line.setEnabled(True)
+            self.terminate_serial()
 
 Main_window()
 

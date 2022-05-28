@@ -9,6 +9,8 @@
 #define PROX_THR 1000
 #define MMTOM(n) 0.001f*n
 
+extern messagebus_t bus;
+
 static THD_WORKING_AREA(obstacle_thd_wa, 512);
 static THD_FUNCTION(obstacle_thd, arg);
 

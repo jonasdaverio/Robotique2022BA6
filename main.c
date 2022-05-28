@@ -39,11 +39,42 @@ int main(void)
 	obstacle_init();
 	comm_init();
 	motors_init();
+	chThdSleepSeconds(1);
 
 	//Make the main thread sleep
 	while(1)
 	{
-		chThdSleepSeconds(1);
+		/* left_motor_set_speed(MTOSTEP(M_PI_4*WHEEL_TRACK)); */
+		/* right_motor_set_speed(-MTOSTEP(M_PI_4*WHEEL_TRACK)); */
+		/* chThdSleepSeconds(1); */
+
+		/* left_motor_set_speed(0); */
+		/* right_motor_set_speed(0); */
+		/* chThdSleepMilliseconds(500); */
+
+		/* left_motor_set_speed(MTOSTEP(0.05f)); */
+		/* right_motor_set_speed(MTOSTEP(0.05f)); */
+		/* chThdSleepSeconds(5); */
+
+		/* left_motor_set_speed(0); */
+		/* right_motor_set_speed(0); */
+		/* chThdSleepMilliseconds(300); */
+
+		/* left_motor_set_speed(MTOSTEP(M_PI_4*WHEEL_TRACK)); */
+		/* right_motor_set_speed(-MTOSTEP(M_PI_4*WHEEL_TRACK)); */
+		/* chThdSleepSeconds(1); */
+
+		/* left_motor_set_speed(0); */
+		/* right_motor_set_speed(0); */
+		/* chThdSleepMilliseconds(500); */
+
+		/* left_motor_set_speed(MTOSTEP(0.05f)); */
+		/* right_motor_set_speed(MTOSTEP(0.05f)); */
+		/* chThdSleepSeconds(1); */
+
+		/* left_motor_set_speed(0); */
+		/* right_motor_set_speed(0); */
+		chThdSleepMilliseconds(300);
 	}
 
 	return 0;
