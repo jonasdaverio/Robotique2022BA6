@@ -14,11 +14,21 @@ extern messagebus_t bus;
 static THD_WORKING_AREA(obstacle_thd_wa, 512);
 static THD_FUNCTION(obstacle_thd, arg);
 
+static BSEMAPHORE_DECL(first_obstacle, true);
 static BSEMAPHORE_DECL(obstacle_ready, true);
-binary_semaphore_t* get_obstacle_sem() { return &obstacle_ready; }
 
 static obstacle_t obstacles = {0};
 const obstacle_t* get_obstacles() { return &obstacles; }
+
+void wait_first_obstacle(void)
+{
+	chBSemWait(&first_obstacle);
+}
+
+void wait_obstacle_ready(void)
+{
+	chBSemWait(&obstacle_ready);
+}
 
 void obstacle_init()
 {
@@ -37,6 +47,8 @@ static THD_FUNCTION(obstacle_thd, arg)
 
 	messagebus_topic_t* prox_topic = messagebus_find_topic_blocking(&bus, "/proximity");
 
+	bool first = true;
+
 	while(chThdShouldTerminateX() == false)
 	{
 		//We just need to wait, we don't need all the data on the bus
@@ -44,7 +56,10 @@ static THD_FUNCTION(obstacle_thd, arg)
 		messagebus_condvar_wait(prox_topic->condvar);
 		messagebus_lock_release(prox_topic->lock);
 
-		obstacles.front       = MMTOM(VL53L0X_get_dist_mm());
+		do
+		{
+			obstacles.front = MMTOM(VL53L0X_get_dist_mm());
+		} while(first && (obstacles.front  == 0));
 
 		obstacles.frontRight1 = get_calibrated_prox(0) > PROX_THR;
 		obstacles.frontRight2 = get_calibrated_prox(1) > PROX_THR;
@@ -56,7 +71,10 @@ static THD_FUNCTION(obstacle_thd, arg)
 		obstacles.frontLeft1  = get_calibrated_prox(7) > PROX_THR;
 
 		chSysLock();
+		if(first) chBSemSignalI(&first_obstacle);
 		chBSemSignalI(&obstacle_ready);
 		chSysUnlock();
+
+		first = false;
 	}
 }

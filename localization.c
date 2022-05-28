@@ -12,6 +12,8 @@
 #include "macros.h"
 #include "my_math.h"
 
+#define EPSILON_ANGLE 0.0001f
+
 extern messagebus_t bus;
 
 //in m relative to beginning position
@@ -27,8 +29,10 @@ static float32_t orientation_matrix[SPATIAL_DIMENSIONS*SPATIAL_DIMENSIONS] = {0}
 static void integrate_motors(float delta_t);
 static void compute_rotation(const float* measuredAcc);
 
-static float* get_averaged_acceleration(const float* measuredAcc);
 static float acc_buffer[ACC_BUFFER_SIZE*SPATIAL_DIMENSIONS] = {0};
+static float meanAcc[SPATIAL_DIMENSIONS] = {0};
+static void fill_acc_buffer(void);
+static void update_average_acc(const float* measuredAcc);
 
 const float* get_speed() { return speed; }
 const float* get_position() { return position; }
@@ -40,13 +44,18 @@ static void reset_matrix(float32_t* matrix_data);
 static THD_WORKING_AREA(localization_thd_wa, 1024);
 static THD_FUNCTION(localization_thd, arg);
 
-void localization_init()
+static uint8_t loc_mode = 0;
+
+void localization_init(uint8_t mode)
 {
+	//odd mode means no accelerometer
+	loc_mode = mode;
 	set_body_led(1); //To signal IMU initialization and calibration
 	chThdSleepSeconds(1); //Wait for the user to stop moving the robot
 	imu_start();
 	calibrate_acc();
 	calibrate_gyro();
+	fill_acc_buffer();
 	set_body_led(0); //Signals IMU init finished
 	reset_orientation();
 
@@ -82,8 +91,12 @@ static THD_FUNCTION(localization_thd, arg)
 			time = chVTGetSystemTime();
 			float delta_t = (float)(time - prev_time)/CH_CFG_ST_FREQUENCY;
 
-			compute_rotation(imu_values.acceleration);
-			integrate_motors(delta_t); //Directly edit position and orientation
+			integrate_motors(delta_t);
+			//because of instability, we might want to disable it
+			if(loc_mode%2)
+			{
+				compute_rotation(imu_values.acceleration);
+			}
 		}
 	}
 }
@@ -110,10 +123,11 @@ static void rotate_orientation(float* rotation_matrix, float* orientation_matrix
 	normalize_matrix33(orientation_matrix_out); //Custom function
 }
 
-//Use both acc and gyro to determine non robot-Z rotation
+//Use the accelerometer to determine non robot-Z rotation
 static void compute_rotation(const float* measuredAcc)
 {
-	float* averaged_acc_robot = get_averaged_acceleration(measuredAcc);
+	update_average_acc(measuredAcc);
+	float* averaged_acc_robot = meanAcc;
 	//We'll compare our orientation with gravity which by definition
 	//should point in z. We'll see how much we diverged from reality
 	//And we'll compute a correction matrix to realign the z axis with gravity
@@ -160,6 +174,7 @@ static void init_rotation_matrix(float x_angle, float y_angle, float z_angle, fl
 }
 
 //Integrate motor speed to get position and orientation
+//return whether it's turning 
 static void integrate_motors(float delta_t)
 {
 	float speed_l = STEPTOM(left_motor_get_desired_speed());
@@ -195,39 +210,41 @@ static void integrate_motors(float delta_t)
 	memcpy(prev_displacement_world, displacement_world, SPATIAL_DIMENSIONS*sizeof(float));
 }
 
-//Circular buffer implimentation with efficient average
-static float* get_averaged_acceleration(const float* measuredAcc)
+static void fill_acc_buffer(void)
+{
+	messagebus_topic_t* imu_topic = messagebus_find_topic_blocking(&bus, "/imu");
+	imu_msg_t imu_values;
+
+	for(uint8_t i=0; i<ACC_BUFFER_SIZE; i++)
+	{
+		messagebus_topic_wait(imu_topic, &imu_values, sizeof(imu_values));
+		float* measuredAcc = imu_values.acceleration;
+		float* currentAcc = acc_buffer + SPATIAL_DIMENSIONS*i;
+		meanAcc[0] =  (i*meanAcc[0] + measuredAcc[0])/(i+1);
+		meanAcc[1] =  (i*meanAcc[1] + measuredAcc[1])/(i+1);
+		meanAcc[2] =  (i*meanAcc[2] + measuredAcc[2])/(i+1);
+		memcpy(currentAcc, measuredAcc, SPATIAL_DIMENSIONS*sizeof(float));
+	}
+}
+
+//Circular buffer implementation with efficient average
+static void update_average_acc(const float* measuredAcc)
 {
 	static float* currentAcc = acc_buffer;
-	static bool firstRound = true;
-	static float meanAcc[SPATIAL_DIMENSIONS] = {0};
 
-	if(firstRound)
-	{
-		uint8_t steps = (currentAcc - acc_buffer)/3;
-		meanAcc[0] = (steps*meanAcc[0] + measuredAcc[0])/(steps+1);
-		meanAcc[1] = (steps*meanAcc[1] + measuredAcc[1])/(steps+1);
-		meanAcc[2] = (steps*meanAcc[2] + measuredAcc[2])/(steps+1);
-		memcpy(currentAcc, measuredAcc, SPATIAL_DIMENSIONS*sizeof(float));
-	}
-	else
-	{
-		//As the number of elements will stay constant form now on,
-		//we can compute the average by subtracting what goes out and
-		//adding what goes in.
-		meanAcc[0] += (measuredAcc[0] - currentAcc[0])/ACC_BUFFER_SIZE;
-		meanAcc[1] += (measuredAcc[1] - currentAcc[1])/ACC_BUFFER_SIZE;
-		meanAcc[2] += (measuredAcc[2] - currentAcc[2])/ACC_BUFFER_SIZE;
-		memcpy(currentAcc, measuredAcc, SPATIAL_DIMENSIONS*sizeof(float));
-	}
+	//As the number of elements will stay constant form now on,
+	//we can compute the average by subtracting what goes out and
+	//adding what goes in.
+	meanAcc[0] += (measuredAcc[0] - currentAcc[0])/ACC_BUFFER_SIZE;
+	meanAcc[1] += (measuredAcc[1] - currentAcc[1])/ACC_BUFFER_SIZE;
+	meanAcc[2] += (measuredAcc[2] - currentAcc[2])/ACC_BUFFER_SIZE;
+	memcpy(currentAcc, measuredAcc, SPATIAL_DIMENSIONS*sizeof(float));
 
 	currentAcc += SPATIAL_DIMENSIONS;
 	if(currentAcc - acc_buffer >= SPATIAL_DIMENSIONS*ACC_BUFFER_SIZE)
 	{
-		firstRound = false;
 		currentAcc = acc_buffer;
 	}
-	return meanAcc;
 }
 
 void reset_orientation()

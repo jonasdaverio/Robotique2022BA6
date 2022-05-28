@@ -1,7 +1,6 @@
 #include <string.h>
 
 #include <ch.h>
-#include <chprintf.h>
 
 #include <serial_comm.h>
 
@@ -36,10 +35,8 @@ static THD_FUNCTION(comm_thd, arg)
 
 	while(chThdShouldTerminateX() == false)
 	{
+		wait_obstacle_ready();
 		systime_t time = chVTGetSystemTime();
-
-		binary_semaphore_t* obstacle_sem = get_obstacle_sem();
-		chBSemWait(obstacle_sem);
 
 		const obstacle_t* obstacles = get_obstacles();
 		const float* position = get_position();

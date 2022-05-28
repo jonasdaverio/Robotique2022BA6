@@ -14,7 +14,7 @@ CSRC += ./main.c \
 		./comm.c \
 		./obstacles.c \
 		./my_math.c\
-		/rotation.c
+		./path_planning.c
 
 #Header folders to include
 INCDIR += 

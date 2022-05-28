@@ -24,13 +24,14 @@ startup_pen_width = 0.001
 startup_resolution = 0.05
 max_sample_nb = 10 #Max value of n parameter (see update_grid_robot_on)
 min_obstacle_probability = 0.5
-prior_obstacle_prob = 0.1 #Prior probability that a random place is an obstacle
+prior_obstacle_prob = 0.2 #Prior probability that a random place is an obstacle
 
 #bayes factors
-obstacle_bayes_factor = 1.6 #Empirical
-no_obstacle_bayes_factor = 1/obstacle_bayes_factor #Empirical
-bayes_factor_robot_on = 0.55 #Empirical
-ir_bayes_factor = 1.8
+obstacle_bayes_factor = 3.0 #Empirical
+no_obstacle_bayes_factor = 0.95 #Empirical
+bayes_factor_robot_on = 0.95 #Empirical
+ir_bayes_factor_on = 4.0
+ir_bayes_factor_off = 0.99
 
 def bayes_inference(prior, bayes_factor):
     posterior = (bayes_factor*prior)/(1-prior+bayes_factor*prior)
@@ -281,7 +282,10 @@ class Map(QObject):
         for grid_coordinate in cells:
             cell_center = self.resolution*np.array(grid_coordinate)
             rel_pos_vec = cell_center - np.array(robot_center)
-            delta_s = np.dot(cell_center, dir_vec) / np.linalg.norm(dir_vec)
+            if all(s_vec == [0, 0]):
+                delta_s = 0
+            else:
+                delta_s = np.dot(cell_center, dir_vec) / np.linalg.norm(dir_vec)
             height = robot_height + slope*delta_s #cell center height
             h_max = height + delta_h
             h_min = height - delta_h
@@ -303,12 +307,11 @@ class Map(QObject):
                 rect = self.add_rectangle(grid_coordinate)
             rel_dist = np.linalg.norm(rel_pos_vec)
             #bayes_factor is smaller towards the edges
-            bayes_factor = bayes_factor_robot_on\
-                         + 4 * (1-bayes_factor_robot_on)\
-                             * (rel_dist / (self.resolution + robot_diameter))**2
+            bayes_factor = (bayes_factor_robot_on - 1)\
+                         * (2*rel_dist/robot_diameter - 1)**2 + 1
+
             if bayes_factor > 1:
                 bayes_factor = 1
-            # bayes_factor = bayes_factor_robot_on
             self.update_obstacle_probability(grid_coordinate, bayes_factor)
 
         self.compute_height_extrema()
@@ -434,9 +437,9 @@ class Map(QObject):
                                 sin(ir_angles[i]+self.orientation) ])\
                    * robot_diameter/2
             if ir[i]:
-                bayes_factor = ir_bayes_factor
+                bayes_factor = ir_bayes_factor_on 
             else:
-                bayes_factor = 1/ir_bayes_factor
+                bayes_factor = ir_bayes_factor_off
 
             self.update_obstacle_probability(self.world_to_grid(ir_pos),
                                              bayes_factor)

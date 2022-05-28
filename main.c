@@ -13,18 +13,20 @@
 #include <memory_protection.h>
 #include <msgbus/messagebus.h>
 #include <main.h>
-#include <motors.h>
-#include <serial_comm.h>
 
 //Local includes 
 #include "comm.h"
 #include "localization.h"
 #include "macros.h"
 #include "obstacles.h"
+#include "path_planning.h"
+#include "selector.h"
 
 messagebus_t bus; //declare in main.h, but defined here
 MUTEX_DECL(bus_lock);
 CONDVAR_DECL(bus_condvar);
+
+
 
 int main(void)
 {
@@ -35,46 +37,17 @@ int main(void)
 
 	messagebus_init(&bus, &bus_lock, &bus_condvar);
 
+	uint8_t mode = get_selector();
+
 	comm_init();
-	localization_init();
+	localization_init(mode);
 	obstacle_init();
-	motors_init();
-	chThdSleepSeconds(1);
+	init_path_planning(mode);
 
 	//Make the main thread sleep
 	while(1)
 	{
-		/* left_motor_set_speed(MTOSTEP(M_PI_4*WHEEL_TRACK)); */
-		/* right_motor_set_speed(-MTOSTEP(M_PI_4*WHEEL_TRACK)); */
-		/* chThdSleepSeconds(1); */
-
-		/* left_motor_set_speed(0); */
-		/* right_motor_set_speed(0); */
-		/* chThdSleepMilliseconds(500); */
-
-		left_motor_set_speed(MTOSTEP(0.05f));
-		right_motor_set_speed(MTOSTEP(0.05f));
-		/* chThdSleepSeconds(5); */
-
-		/* left_motor_set_speed(0); */
-		/* right_motor_set_speed(0); */
-		/* chThdSleepMilliseconds(300); */
-
-		/* left_motor_set_speed(MTOSTEP(M_PI_4*WHEEL_TRACK)); */
-		/* right_motor_set_speed(-MTOSTEP(M_PI_4*WHEEL_TRACK)); */
-		/* chThdSleepSeconds(1); */
-
-		/* left_motor_set_speed(0); */
-		/* right_motor_set_speed(0); */
-		/* chThdSleepMilliseconds(500); */
-
-		/* left_motor_set_speed(MTOSTEP(0.05f)); */
-		/* right_motor_set_speed(MTOSTEP(0.05f)); */
-		/* chThdSleepSeconds(1); */
-
-		/* left_motor_set_speed(0); */
-		/* right_motor_set_speed(0); */
-		chThdSleepMilliseconds(300);
+		chThdSleepSeconds(1);
 	}
 
 	return 0;
