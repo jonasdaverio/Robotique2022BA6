@@ -13,8 +13,11 @@
 #define DIST_OBJ 0.05 //min distance before turning, in m
 #define TURN_SPEED 100
 
+static THD_WORKING_AREA(slope_thd_wa, 128);
 static THD_WORKING_AREA(path_planning_thd_wa, 256);
+
 static THD_FUNCTION(path_planning_thd, arg);
+static THD_FUNCTION(slope_thd, arg);
 
 //i=0 -> tourne droite, 1 ->gauche
 void turn(float angle)
@@ -59,6 +62,8 @@ void init_path_planning(uint8_t mode)
 	{
 		right_motor_set_speed(MOTOR_SPEED_CRUISE);
 		left_motor_set_speed(MOTOR_SPEED_CRUISE);
+		chThdCreateStatic(slope_thd_wa, sizeof(slope_thd_wa),
+				NORMALPRIO, slope_thd, NULL);
 	}
 	else
 	{
@@ -66,6 +71,36 @@ void init_path_planning(uint8_t mode)
 			NORMALPRIO, path_planning_thd, NULL);
 	}
 }
+
+static THD_FUNCTION(slope_thd, arg)
+{
+	(void) arg;
+	chRegSetThreadName(__FUNCTION__);
+
+	wait_first_obstacle();
+	while(chThdShouldTerminateX() == false)
+	{
+		systime_t time = chVTGetSystemTime();
+
+		float distance_TOF = get_obstacles()->front;
+
+		bool collision = (distance_TOF < DIST_OBJ)
+		       	      || get_obstacles()->frontLeft1
+		       	      || get_obstacles()->frontLeft2
+		       	      || get_obstacles()->frontRight1
+		       	      || get_obstacles()->frontRight2;
+		if(collision)
+		{
+			right_motor_set_speed(0);
+			left_motor_set_speed(0);
+			break;
+		}
+
+		chThdSleepUntilWindowed(time, time+MS2ST(PERIOD));
+	}
+}
+
+
 
 static THD_FUNCTION(path_planning_thd, arg)
 {
